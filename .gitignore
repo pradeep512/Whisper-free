@@ -37,3 +37,6 @@ transcriptions.db
 # OS
 .DS_Store
 Thumbs.db
+
+# Dependencies (Use requirements.txt instead)
+whisper/

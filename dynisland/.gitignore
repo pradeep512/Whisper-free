@@ -1,0 +1,9 @@
+.vscode
+/target
+perf.*
+disabled-rust-toolchain.toml
+*tmp.md
+*tmp.txt
+heaptrack.*
+*.sh
+/*.txt
