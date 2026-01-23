@@ -63,6 +63,19 @@ class ConfigManager:
             'retention_days': 30,
             'save_audio_files': False,
         },
+        'file_transcribe': {
+            'last_directory': str(Path.home()),
+            'auto_open_output': False,
+            'add_to_history': True,
+            'timestamp_duplicates': True,
+            'output_formats': {
+                'txt': True,
+                'srt': False,
+                'vtt': False,
+                'json': False,
+                'tsv': False,
+            },
+        },
     }
 
     # Valid values for validation
