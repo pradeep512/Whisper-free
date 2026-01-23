@@ -64,9 +64,26 @@ class DatabaseManager:
                     language TEXT,
                     duration REAL,
                     model_used TEXT,
-                    audio_path TEXT
+                    audio_path TEXT,
+                    source_type TEXT DEFAULT 'microphone',
+                    output_path TEXT
                 )
             """)
+
+            # Migrate existing databases: add new columns if they don't exist
+            try:
+                cursor.execute("SELECT source_type FROM transcriptions LIMIT 1")
+            except sqlite3.OperationalError:
+                # Column doesn't exist, add it
+                logger.info("Adding source_type column to existing database")
+                cursor.execute("ALTER TABLE transcriptions ADD COLUMN source_type TEXT DEFAULT 'microphone'")
+
+            try:
+                cursor.execute("SELECT output_path FROM transcriptions LIMIT 1")
+            except sqlite3.OperationalError:
+                # Column doesn't exist, add it
+                logger.info("Adding output_path column to existing database")
+                cursor.execute("ALTER TABLE transcriptions ADD COLUMN output_path TEXT")
 
             # Create indices for performance
             cursor.execute("""
@@ -92,7 +109,9 @@ class DatabaseManager:
         language: Optional[str] = None,
         duration: float = 0.0,
         model_used: str = "",
-        audio_path: Optional[str] = None
+        audio_path: Optional[str] = None,
+        source_type: str = 'microphone',
+        output_path: Optional[str] = None
     ) -> int:
         """
         Insert new transcription into database.
@@ -103,6 +122,8 @@ class DatabaseManager:
             duration: Audio duration in seconds
             model_used: Whisper model name used
             audio_path: Optional path to saved audio file
+            source_type: 'microphone' or 'file' (default: 'microphone')
+            output_path: Optional path to saved .txt output file
 
         Returns:
             Row ID of inserted transcription
@@ -113,14 +134,15 @@ class DatabaseManager:
         try:
             cursor = self.conn.cursor()
             cursor.execute("""
-                INSERT INTO transcriptions (text, language, duration, model_used, audio_path)
-                VALUES (?, ?, ?, ?, ?)
-            """, (text.strip(), language, duration, model_used, audio_path))
+                INSERT INTO transcriptions
+                (text, language, duration, model_used, audio_path, source_type, output_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (text.strip(), language, duration, model_used, audio_path, source_type, output_path))
 
             self.conn.commit()
             row_id = cursor.lastrowid
 
-            logger.info(f"Added transcription ID {row_id} ({len(text)} chars)")
+            logger.info(f"Added transcription ID {row_id} ({len(text)} chars, source={source_type})")
             return row_id
 
         except sqlite3.Error as e:

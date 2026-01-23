@@ -38,3 +38,17 @@ storage:
   database_path: "~/.config/whisper-free/history.db"
   retention_days: 30  # 0 for unlimited
   save_audio_files: false
+
+# File transcription settings
+file_transcribe:
+  last_directory: "~"  # Last directory browsed
+  auto_open_output: false  # Automatically open .txt file after transcription
+  add_to_history: true  # Add file transcriptions to history panel
+  timestamp_duplicates: true  # Append timestamp if output file exists
+  # Output format selection (multiple formats can be enabled)
+  output_formats:
+    txt: true   # Plain text transcription
+    srt: false  # SRT subtitles (with timestamps)
+    vtt: false  # WebVTT subtitles
+    json: false # Full JSON with word-level timestamps
+    tsv: false  # Tab-separated values with timestamps

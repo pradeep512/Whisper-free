@@ -331,7 +331,7 @@ class WhisperFreeApp(QObject):
         self.overlay.set_position(position, monitor)
 
         # Main window
-        self.main_window = MainWindow(self.db, self.config)
+        self.main_window = MainWindow(self.db, self.config, self.whisper)
 
         # Update initial VRAM display
         vram_usage = self.whisper.get_vram_usage()

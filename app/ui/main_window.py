@@ -18,6 +18,7 @@ import logging
 
 from app.ui.history_panel import HistoryPanel
 from app.ui.settings_panel import SettingsPanel
+from app.ui.file_transcribe_panel import FileTranscribePanel
 
 logger = logging.getLogger(__name__)
 
@@ -31,20 +32,23 @@ class MainWindow(QMainWindow):
     # Signals
     settings_changed = Signal()  # Emitted when user saves settings
 
-    def __init__(self, db_manager, config_manager):
+    def __init__(self, db_manager, config_manager, whisper_engine=None):
         """
         Initialize main window
 
         Args:
             db_manager: DatabaseManager instance
             config_manager: ConfigManager instance
+            whisper_engine: WhisperEngine instance (optional, for file transcription)
         """
         super().__init__()
         self.db = db_manager
         self.config = config_manager
+        self.whisper_engine = whisper_engine
 
         # Store panels
         self.history_panel = None
+        self.file_transcribe_panel = None
         self.settings_panel = None
         self.about_panel = None
 
@@ -120,9 +124,9 @@ class MainWindow(QMainWindow):
         # Or easier: Clear and re-add manually.
         
         self.sidebar.clear()
-        
+
         # Top items
-        for text in ["History", "Settings"]:
+        for text in ["History", "File Transcribe", "Settings"]:
             item = QListWidgetItem(text)
             item.setSizeHint(QSize(140, 45))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -138,21 +142,41 @@ class MainWindow(QMainWindow):
 
         # Create panels
         self.history_panel = HistoryPanel(self.db)
+
+        # File transcribe panel (only if whisper_engine is available)
+        if self.whisper_engine:
+            self.file_transcribe_panel = FileTranscribePanel(
+                self.config,
+                self.whisper_engine,
+                self.db
+            )
+        else:
+            # Create placeholder if engine not available
+            self.file_transcribe_panel = self._create_placeholder_panel(
+                "File Transcribe",
+                "File transcription requires WhisperEngine.\nPlease restart the application."
+            )
+
         self.settings_panel = SettingsPanel(self.config)
         self.about_panel = self._create_about_panel()
 
-        # Add panels to stack
-        self.stack.addWidget(self.history_panel)
-        self.stack.addWidget(self.settings_panel)
-        self.stack.addWidget(self.about_panel)
+        # Add panels to stack (order matches sidebar)
+        self.stack.addWidget(self.history_panel)          # Index 0
+        self.stack.addWidget(self.file_transcribe_panel)  # Index 1
+        self.stack.addWidget(self.settings_panel)         # Index 2
+        self.stack.addWidget(self.about_panel)            # Index 3
 
         # Connect settings panel signals
         self.settings_panel.settings_saved.connect(self.settings_changed.emit)
 
+        # Connect file transcribe panel signals (if available)
+        if self.whisper_engine and hasattr(self.file_transcribe_panel, 'file_transcribed'):
+            self.file_transcribe_panel.file_transcribed.connect(self._on_file_transcribed)
+
         # Add to main layout
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.stack, 1)  # Stretch factor 1
-        
+
         # Select History by default (Now safe to trigger signal)
         self.sidebar.setCurrentRow(0)
 
@@ -199,6 +223,27 @@ class MainWindow(QMainWindow):
 
         return widget
 
+    def _create_placeholder_panel(self, title: str, message: str) -> QWidget:
+        """Create a placeholder panel with message"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        message_label = QLabel(message)
+        message_label.setStyleSheet("font-size: 14px; color: #888888;")
+        message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        message_label.setWordWrap(True)
+
+        layout.addWidget(title_label)
+        layout.addWidget(message_label)
+        layout.addStretch()
+
+        return widget
+
     def _setup_status_bar(self):
         """Create status bar with status, model, and VRAM display"""
         status_bar = QStatusBar()
@@ -239,16 +284,14 @@ class MainWindow(QMainWindow):
     def _on_sidebar_changed(self, row: int):
         """Handle sidebar selection change"""
         # Map row index to stack index
-        # Rows: 0=History, 1=Settings, 2=Spacer, 3=About
-        
-        if row == 0: # History
-            self.stack.setCurrentIndex(0)
-        elif row == 1: # Settings
-            self.stack.setCurrentIndex(1)
-        elif row == 2: # About
-            self.stack.setCurrentIndex(2)
+        # Rows: 0=History, 1=File Transcribe, 2=Settings, 3=About
+        # Stack indices match sidebar rows directly
 
-        logger.debug(f"Sidebar changed to row {row}, stack index {self.stack.currentIndex()}")
+        if row >= 0 and row < self.stack.count():
+            self.stack.setCurrentIndex(row)
+            logger.debug(f"Sidebar changed to row {row}, stack index {self.stack.currentIndex()}")
+        else:
+            logger.warning(f"Invalid sidebar row: {row}")
 
     def add_transcription(self, text: str, duration: float, language: str, model: str):
         """
@@ -282,15 +325,39 @@ class MainWindow(QMainWindow):
         self.sidebar.setCurrentRow(0)
         self.stack.setCurrentIndex(0)
 
-    def show_settings(self):
-        """Switch to settings panel"""
+    def show_file_transcribe(self):
+        """Switch to file transcribe panel"""
         self.sidebar.setCurrentRow(1)
         self.stack.setCurrentIndex(1)
 
+    def show_settings(self):
+        """Switch to settings panel"""
+        self.sidebar.setCurrentRow(2)
+        self.stack.setCurrentIndex(2)
+
     def show_about(self):
         """Switch to about panel"""
-        self.sidebar.setCurrentRow(2) # Index 2 now
-        self.stack.setCurrentIndex(2)
+        self.sidebar.setCurrentRow(3)
+        self.stack.setCurrentIndex(3)
+
+    def _on_file_transcribed(self, result: dict):
+        """Handle file transcription completion"""
+        try:
+            duration = result.get('duration', 0.0)
+            language = result.get('language', 'unknown')
+            text_len = len(result.get('text', ''))
+
+            # Update status bar
+            self.update_status(f"File transcribed: {text_len} chars")
+
+            # Refresh history if file was added to database
+            add_to_history = self.config.get('file_transcribe.add_to_history', True)
+            if add_to_history:
+                self.history_panel.load_history()
+
+            logger.info(f"File transcription completed: {duration:.1f}s, {language}, {text_len} chars")
+        except Exception as e:
+            logger.error(f"Error handling file transcription completion: {e}")
 
     def update_status(self, message: str):
         """
