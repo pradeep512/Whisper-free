@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QFrame, QMessageBox, QFileDialog, QApplication, QScrollArea,
     QGridLayout, QSizePolicy
 )
-from PySide6.QtCore import Signal, Qt, QSize, QEvent
+from PySide6.QtCore import Signal, Qt, QSize, QEvent, QTimer
 from PySide6.QtGui import QFont
 from datetime import datetime
 from pathlib import Path
@@ -41,8 +41,20 @@ class HistoryPanel(QWidget):
         self.db = db_manager
         self.history_widgets = []  # Store widget instances
         self.current_transcriptions = []
+        self.current_filter = None  # Filter by source_type (None, 'microphone', 'file')
+        self._pending_reload = False
+        self.current_offset = 0  # Pagination offset
+        self.page_size = 50  # Items per page
+        self.has_more_items = True  # Whether there are more items to load
+
+        # Debounce timer to prevent rapid reloads
+        self.reload_timer = QTimer()
+        self.reload_timer.setSingleShot(True)
+        self.reload_timer.setInterval(300)  # 300ms debounce
+        self.reload_timer.timeout.connect(self._perform_reload)
+
         self._setup_ui()
-        
+
         # Install event filter for resize handling
         self.installEventFilter(self)
 
@@ -104,6 +116,57 @@ class HistoryPanel(QWidget):
         search_layout.addWidget(self.search_input, 1)
         search_layout.addWidget(clear_btn)
         layout.addLayout(search_layout)
+
+        # Filter buttons
+        filter_layout = QHBoxLayout()
+        filter_layout.setSpacing(8)
+
+        filter_label = QLabel("Filter:")
+        filter_label.setStyleSheet("color: #888888; font-size: 12px;")
+        filter_layout.addWidget(filter_label)
+
+        self.filter_all_btn = QPushButton("All")
+        self.filter_all_btn.setCheckable(True)
+        self.filter_all_btn.setChecked(True)
+        self.filter_all_btn.clicked.connect(lambda: self._set_filter(None))
+
+        self.filter_ptt_btn = QPushButton("🎤 Push-to-Talk")
+        self.filter_ptt_btn.setCheckable(True)
+        self.filter_ptt_btn.clicked.connect(lambda: self._set_filter('microphone'))
+
+        self.filter_file_btn = QPushButton("📁 Files")
+        self.filter_file_btn.setCheckable(True)
+        self.filter_file_btn.clicked.connect(lambda: self._set_filter('file'))
+
+        # Style filter buttons
+        filter_btn_style = """
+            QPushButton {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                color: #888888;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #ffffff;
+            }
+            QPushButton:checked {
+                background-color: #0078d4;
+                border: 1px solid #0078d4;
+                color: #ffffff;
+            }
+        """
+        self.filter_all_btn.setStyleSheet(filter_btn_style)
+        self.filter_ptt_btn.setStyleSheet(filter_btn_style)
+        self.filter_file_btn.setStyleSheet(filter_btn_style)
+
+        filter_layout.addWidget(self.filter_all_btn)
+        filter_layout.addWidget(self.filter_ptt_btn)
+        filter_layout.addWidget(self.filter_file_btn)
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
 
         # History Grid Area
         self.scroll_area = QScrollArea()
@@ -178,7 +241,30 @@ class HistoryPanel(QWidget):
         export_json_btn.clicked.connect(self.export_to_json)
         export_json_btn.setStyleSheet(self._button_style())
 
+        # Load More button
+        self.load_more_btn = QPushButton("Load More...")
+        self.load_more_btn.clicked.connect(self._load_more)
+        self.load_more_btn.setVisible(False)  # Hidden initially
+        self.load_more_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0078d4;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 13px;
+                color: #ffffff;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #005a9e;
+            }
+            QPushButton:pressed {
+                background-color: #004578;
+            }
+        """)
+
         footer_layout.addWidget(clear_history_btn)
+        footer_layout.addWidget(self.load_more_btn)
         footer_layout.addStretch()
         footer_layout.addWidget(export_txt_btn)
         footer_layout.addWidget(export_json_btn)
@@ -236,48 +322,85 @@ class HistoryPanel(QWidget):
                     f"Failed to clear history:\n{str(e)}"
                 )
 
-    def load_history(self, limit: int = 50):
+    def load_history(self, reset: bool = True):
         """
-        Load recent transcriptions from database
+        Request a history reload (debounced to prevent rapid updates).
 
         Args:
-            limit: Maximum number of entries to load
+            reset: If True, reset pagination to first page
         """
-        try:
-            transcriptions = self.db.get_recent_transcriptions(limit=limit)
-            self.current_transcriptions = transcriptions
+        if reset:
+            self.current_offset = 0
+        self._pending_reload = True
+        self.reload_timer.start()  # Restart timer (resets if already running)
 
-            # Clear existing
-            self._clear_grid()
-            
-            # Store data
-            self.current_transcriptions = transcriptions
-            
-            # Create widgets (newest first)
-            # The DB returns newest first typically, but let's ensure consistency
-            # If DB returns newest first [New, Old], we just iterate
-            # If DB returns oldest first [Old, New], we reversed
-            # Assuming DB get_recent_transcriptions returns Newest First (DESC ID)
-            # If not, we reverse. Let's assume standard DESC order.
-            
-            # Actually line 181 in original code had `reversed(transcriptions)`.
-            # If user wants newest at TOP, and DB returns Newest->Oldest, we iterate normally.
-            # If DB returns Oldest->Newest, we reverse. 
-            # Usually logs are SELECT ... ORDER BY id DESC.
-            # Let's assume input is list of dicts. We want NEWEST at grid index 0.
-            
-            # Reset widgets list
-            self.history_widgets = []
-            
+    def _perform_reload(self):
+        """
+        Actually reload history after debounce period.
+        Loads items based on current pagination state.
+        """
+        if not self._pending_reload:
+            return
+
+        self._pending_reload = False
+
+        try:
+            # Fetch transcriptions from database with pagination
+            transcriptions = self.db.get_recent_transcriptions(
+                limit=self.page_size,
+                offset=self.current_offset
+            )
+
+            # Check if there are more items
+            total_count = self.db.get_transcription_count()
+            self.has_more_items = (self.current_offset + self.page_size) < total_count
+
+            # Apply source type filter if set
+            if self.current_filter:
+                transcriptions = [
+                    t for t in transcriptions
+                    if t.get('source_type') == self.current_filter
+                ]
+
+            # If this is the first page (offset=0), replace all content
+            if self.current_offset == 0:
+                # Check if content actually changed (avoid unnecessary UI updates)
+                if not self._has_content_changed(transcriptions):
+                    logger.debug("History content unchanged, skipping UI update")
+                    # Still update Load More button visibility
+                    self.load_more_btn.setVisible(self.has_more_items)
+                    return
+
+                # Clear existing
+                self._clear_grid()
+
+                # Store data
+                self.current_transcriptions = transcriptions
+
+                # Reset widgets list
+                self.history_widgets = []
+            else:
+                # Append mode: add to existing transcriptions
+                self.current_transcriptions.extend(transcriptions)
+
+            # Create widgets for new transcriptions
             for trans in transcriptions:
                 widget = self._create_history_item_widget(trans)
-                widget.show() # Ensure widget is visible for layout
+                widget.show()  # Ensure widget is visible for layout
                 self.history_widgets.append(widget)
-                
+
             # Layout
             self._update_grid_layout()
 
-            logger.info(f"Loaded {len(transcriptions)} transcriptions")
+            # Update Load More button visibility
+            self.load_more_btn.setVisible(self.has_more_items)
+            if self.has_more_items:
+                remaining = total_count - (self.current_offset + len(transcriptions))
+                self.load_more_btn.setText(f"Load More... ({remaining} remaining)")
+            else:
+                self.load_more_btn.setText("Load More...")
+
+            logger.info(f"Loaded {len(transcriptions)} transcriptions (total: {len(self.current_transcriptions)})")
 
         except Exception as e:
             logger.error(f"Failed to load history: {e}")
@@ -286,6 +409,12 @@ class HistoryPanel(QWidget):
                 "Error",
                 f"Failed to load history:\n{str(e)}"
             )
+
+    def _load_more(self):
+        """Load next page of transcriptions"""
+        self.current_offset += self.page_size
+        self.load_history(reset=False)  # Don't reset offset
+        logger.info(f"Loading more transcriptions (offset={self.current_offset})")
 
     def search(self, query: str):
         """
@@ -558,3 +687,48 @@ class HistoryPanel(QWidget):
                 "Export Failed",
                 f"Failed to export to JSON:\n{str(e)}"
             )
+
+    def _has_content_changed(self, new_transcriptions: list) -> bool:
+        """
+        Check if transcription list has actually changed.
+
+        Args:
+            new_transcriptions: New transcription list to compare
+
+        Returns:
+            True if content changed, False otherwise
+        """
+        # If lengths differ, content changed
+        if len(new_transcriptions) != len(self.current_transcriptions):
+            return True
+
+        # If both empty, no change
+        if not new_transcriptions:
+            return False
+
+        # Compare IDs and timestamps (more efficient than deep comparison)
+        for old, new in zip(self.current_transcriptions, new_transcriptions):
+            if old.get('id') != new.get('id') or old.get('timestamp') != new.get('timestamp'):
+                return True
+
+        # No differences found
+        return False
+
+    def _set_filter(self, source_type: str = None):
+        """
+        Set source type filter and reload history.
+
+        Args:
+            source_type: 'microphone', 'file', or None for all
+        """
+        self.current_filter = source_type
+
+        # Update button states
+        self.filter_all_btn.setChecked(source_type is None)
+        self.filter_ptt_btn.setChecked(source_type == 'microphone')
+        self.filter_file_btn.setChecked(source_type == 'file')
+
+        # Reload with filter applied
+        self.load_history()
+
+        logger.debug(f"Filter set to: {source_type or 'all'}")

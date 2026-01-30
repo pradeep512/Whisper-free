@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 import logging
 import json
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,13 @@ class DatabaseManager:
         # Connect to database
         self.conn = sqlite3.connect(
             str(self.db_path),
-            check_same_thread=False  # Allow multi-threaded access for Qt
+            check_same_thread=False,  # Allow multi-threaded access for Qt
+            isolation_level=None  # Autocommit mode for thread safety
         )
         self.conn.row_factory = sqlite3.Row  # Enable column access by name
+
+        # Thread lock for database operations
+        self._db_lock = threading.Lock()
 
         # Enable foreign keys
         self.conn.execute("PRAGMA foreign_keys = ON")
@@ -96,6 +101,58 @@ class DatabaseManager:
                 ON transcriptions(text)
             """)
 
+            # Create transcription_jobs table (for job management and pause/resume)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transcription_jobs (
+                    id TEXT PRIMARY KEY,
+                    priority INTEGER NOT NULL,
+                    status INTEGER NOT NULL,
+                    file_path TEXT,
+                    language TEXT,
+                    settings_json TEXT NOT NULL,
+                    total_chunks INTEGER DEFAULT 1,
+                    completed_chunks INTEGER DEFAULT 0,
+                    current_chunk_index INTEGER DEFAULT 0,
+                    result_text TEXT,
+                    error_message TEXT,
+                    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+                    started_at DATETIME,
+                    completed_at DATETIME,
+                    transcription_id INTEGER,
+                    FOREIGN KEY (transcription_id) REFERENCES transcriptions(id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_job_status
+                ON transcription_jobs(status, priority)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_job_created
+                ON transcription_jobs(created_at DESC)
+            """)
+
+            # Create transcription_chunks table (for resumable chunked processing)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transcription_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    start_time REAL,
+                    end_time REAL,
+                    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+                    FOREIGN KEY (job_id) REFERENCES transcription_jobs(id),
+                    UNIQUE(job_id, chunk_index)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chunk_job
+                ON transcription_chunks(job_id, chunk_index)
+            """)
+
             self.conn.commit()
             logger.info("Database tables created successfully")
 
@@ -132,18 +189,18 @@ class DatabaseManager:
             raise ValueError("Transcription text cannot be empty")
 
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO transcriptions
-                (text, language, duration, model_used, audio_path, source_type, output_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (text.strip(), language, duration, model_used, audio_path, source_type, output_path))
+            with self._db_lock:
+                cursor = self.conn.cursor()
+                cursor.execute("""
+                    INSERT INTO transcriptions
+                    (text, language, duration, model_used, audio_path, source_type, output_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (text.strip(), language, duration, model_used, audio_path, source_type, output_path))
 
-            self.conn.commit()
-            row_id = cursor.lastrowid
+                row_id = cursor.lastrowid
 
-            logger.info(f"Added transcription ID {row_id} ({len(text)} chars, source={source_type})")
-            return row_id
+                logger.info(f"Added transcription ID {row_id} ({len(text)} chars, source={source_type})")
+                return row_id
 
         except sqlite3.Error as e:
             logger.error(f"Error adding transcription: {e}")
@@ -179,12 +236,13 @@ class DatabaseManager:
             logger.warning(f"Error formatting timestamp: {e}")
             return timestamp_str
 
-    def get_recent_transcriptions(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_recent_transcriptions(self, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         """
-        Get recent transcriptions ordered by timestamp.
+        Get recent transcriptions ordered by timestamp with pagination support.
 
         Args:
-            limit: Maximum number of results
+            limit: Maximum number of results (default: 50)
+            offset: Number of results to skip (default: 0)
 
         Returns:
             List of dicts with keys:
@@ -194,15 +252,16 @@ class DatabaseManager:
                 - language: str
                 - duration: float
                 - model_used: str
+                - source_type: str
         """
         try:
             cursor = self.conn.cursor()
             cursor.execute("""
-                SELECT id, timestamp, text, language, duration, model_used
+                SELECT id, timestamp, text, language, duration, model_used, source_type
                 FROM transcriptions
                 ORDER BY timestamp DESC, id DESC
-                LIMIT ?
-            """, (limit,))
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
 
             results = []
             for row in cursor.fetchall():
@@ -212,15 +271,34 @@ class DatabaseManager:
                     'text': row['text'],
                     'language': row['language'] or '',
                     'duration': row['duration'] or 0.0,
-                    'model_used': row['model_used'] or ''
+                    'model_used': row['model_used'] or '',
+                    'source_type': row['source_type'] or 'microphone'
                 })
 
-            logger.debug(f"Retrieved {len(results)} recent transcriptions")
+            logger.debug(f"Retrieved {len(results)} transcriptions (offset={offset})")
             return results
 
         except sqlite3.Error as e:
             logger.error(f"Error getting recent transcriptions: {e}")
             raise RuntimeError(f"Failed to get recent transcriptions: {e}")
+
+    def get_transcription_count(self) -> int:
+        """
+        Get total count of transcriptions in database.
+
+        Returns:
+            Total number of transcriptions
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT COUNT(*) as count FROM transcriptions")
+            row = cursor.fetchone()
+            count = row['count'] if row else 0
+            logger.debug(f"Total transcriptions: {count}")
+            return count
+        except sqlite3.Error as e:
+            logger.error(f"Error getting transcription count: {e}")
+            return 0
 
     def search_transcriptions(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -458,6 +536,346 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"Error getting stats: {e}")
             raise RuntimeError(f"Failed to get database stats: {e}")
+
+    # ==================== Job Management Methods ====================
+
+    def add_transcription_job(
+        self,
+        job_id: str,
+        priority: int,
+        status: int,
+        file_path: Optional[str] = None,
+        language: Optional[str] = None,
+        settings: Optional[Dict[str, Any]] = None,
+        total_chunks: int = 1,
+        completed_chunks: int = 0,
+        current_chunk_index: int = 0
+    ) -> str:
+        """
+        Add a new transcription job to the database.
+
+        Args:
+            job_id: Unique job identifier
+            priority: Job priority (0=HIGH, 1=NORMAL, 2=LOW)
+            status: Job status (0=PENDING, 1=RUNNING, 2=PAUSED, 3=COMPLETED, 4=FAILED, 5=CANCELLED)
+            file_path: Path to audio file (None for PTT jobs)
+            language: Language code or None for auto-detect
+            settings: Whisper transcription settings dictionary
+            total_chunks: Total number of chunks for chunked processing
+            completed_chunks: Number of completed chunks
+            current_chunk_index: Current chunk being processed
+
+        Returns:
+            Job ID
+        """
+        try:
+            settings_json = json.dumps(settings or {})
+
+            query = """
+                INSERT INTO transcription_jobs
+                (id, priority, status, file_path, language, settings_json,
+                 total_chunks, completed_chunks, current_chunk_index)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+
+            with self._db_lock:
+                self.conn.execute(query, (
+                    job_id,
+                    priority,
+                    status,
+                    file_path,
+                    language,
+                    settings_json,
+                    total_chunks,
+                    completed_chunks,
+                    current_chunk_index
+                ))
+
+            logger.info(f"Added job {job_id} to database")
+            return job_id
+
+        except sqlite3.Error as e:
+            logger.error(f"Error adding job: {e}")
+            raise RuntimeError(f"Failed to add job to database: {e}")
+
+    def update_transcription_job(
+        self,
+        job_id: str,
+        status: Optional[int] = None,
+        completed_chunks: Optional[int] = None,
+        current_chunk_index: Optional[int] = None,
+        result_text: Optional[str] = None,
+        error_message: Optional[str] = None,
+        transcription_id: Optional[int] = None
+    ) -> None:
+        """
+        Update an existing transcription job.
+
+        Args:
+            job_id: Job ID to update
+            status: New status value
+            completed_chunks: Updated completed chunks count
+            current_chunk_index: Updated current chunk index
+            result_text: Final transcription result
+            error_message: Error message if failed
+            transcription_id: Foreign key to transcriptions table
+        """
+        try:
+            # Build dynamic UPDATE query based on provided parameters
+            updates = []
+            params = []
+
+            if status is not None:
+                updates.append("status = ?")
+                params.append(status)
+
+            if completed_chunks is not None:
+                updates.append("completed_chunks = ?")
+                params.append(completed_chunks)
+
+            if current_chunk_index is not None:
+                updates.append("current_chunk_index = ?")
+                params.append(current_chunk_index)
+
+            if result_text is not None:
+                updates.append("result_text = ?")
+                params.append(result_text)
+
+            if error_message is not None:
+                updates.append("error_message = ?")
+                params.append(error_message)
+
+            if transcription_id is not None:
+                updates.append("transcription_id = ?")
+                params.append(transcription_id)
+
+            # Update timestamps based on status
+            if status == 1:  # RUNNING
+                updates.append("""started_at = CASE WHEN started_at IS NULL
+                                  THEN strftime('%Y-%m-%d %H:%M:%f', 'now')
+                                  ELSE started_at END""")
+            elif status in [3, 4, 5]:  # COMPLETED, FAILED, CANCELLED
+                updates.append("completed_at = strftime('%Y-%m-%d %H:%M:%f', 'now')")
+
+            if not updates:
+                logger.warning(f"No updates provided for job {job_id}")
+                return
+
+            params.append(job_id)
+            query = f"UPDATE transcription_jobs SET {', '.join(updates)} WHERE id = ?"
+
+            with self._db_lock:
+                self.conn.execute(query, params)
+
+            logger.debug(f"Updated job {job_id}")
+
+        except sqlite3.Error as e:
+            logger.error(f"Error updating job: {e}")
+            raise RuntimeError(f"Failed to update job: {e}")
+
+    def get_transcription_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a transcription job by ID.
+
+        Args:
+            job_id: Job ID to retrieve
+
+        Returns:
+            Dictionary with job data, or None if not found
+        """
+        try:
+            query = "SELECT * FROM transcription_jobs WHERE id = ?"
+            cursor = self.conn.execute(query, (job_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            # Convert row to dictionary
+            job = dict(row)
+
+            # Parse JSON settings
+            if job.get('settings_json'):
+                job['settings'] = json.loads(job['settings_json'])
+            else:
+                job['settings'] = {}
+
+            return job
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting job: {e}")
+            raise RuntimeError(f"Failed to get job: {e}")
+
+    def get_pending_jobs(self) -> List[Dict[str, Any]]:
+        """
+        Get all pending or paused jobs (for recovery on app restart).
+
+        Returns:
+            List of job dictionaries, ordered by priority and creation time
+        """
+        try:
+            query = """
+                SELECT * FROM transcription_jobs
+                WHERE status IN (0, 2)
+                ORDER BY priority ASC, created_at ASC
+            """
+
+            cursor = self.conn.execute(query)
+            rows = cursor.fetchall()
+
+            jobs = []
+            for row in rows:
+                job = dict(row)
+                if job.get('settings_json'):
+                    job['settings'] = json.loads(job['settings_json'])
+                else:
+                    job['settings'] = {}
+                jobs.append(job)
+
+            logger.info(f"Retrieved {len(jobs)} pending jobs")
+            return jobs
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting pending jobs: {e}")
+            raise RuntimeError(f"Failed to get pending jobs: {e}")
+
+    def add_transcription_chunk(
+        self,
+        job_id: str,
+        chunk_index: int,
+        text: str,
+        start_time: float,
+        end_time: float
+    ) -> int:
+        """
+        Add or update a transcription chunk.
+
+        Args:
+            job_id: Job ID this chunk belongs to
+            chunk_index: Index of this chunk
+            text: Transcribed text for this chunk
+            start_time: Start time in audio (seconds)
+            end_time: End time in audio (seconds)
+
+        Returns:
+            Chunk row ID
+        """
+        try:
+            query = """
+                INSERT OR REPLACE INTO transcription_chunks
+                (job_id, chunk_index, text, start_time, end_time)
+                VALUES (?, ?, ?, ?, ?)
+            """
+
+            cursor = self.conn.execute(query, (job_id, chunk_index, text, start_time, end_time))
+            self.conn.commit()
+
+            logger.debug(f"Added chunk {chunk_index} for job {job_id}")
+            return cursor.lastrowid
+
+        except sqlite3.Error as e:
+            logger.error(f"Error adding chunk: {e}")
+            raise RuntimeError(f"Failed to add chunk: {e}")
+
+    def get_job_chunks(self, job_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all chunks for a job, ordered by chunk index.
+
+        Args:
+            job_id: Job ID to get chunks for
+
+        Returns:
+            List of chunk dictionaries
+        """
+        try:
+            query = """
+                SELECT chunk_index, text, start_time, end_time, created_at
+                FROM transcription_chunks
+                WHERE job_id = ?
+                ORDER BY chunk_index ASC
+            """
+
+            cursor = self.conn.execute(query, (job_id,))
+            rows = cursor.fetchall()
+
+            chunks = [dict(row) for row in rows]
+            logger.debug(f"Retrieved {len(chunks)} chunks for job {job_id}")
+            return chunks
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting chunks: {e}")
+            raise RuntimeError(f"Failed to get chunks: {e}")
+
+    def delete_job(self, job_id: str) -> None:
+        """
+        Delete a job and all its chunks.
+
+        Args:
+            job_id: Job ID to delete
+        """
+        try:
+            # Delete chunks first (foreign key constraint)
+            self.conn.execute("DELETE FROM transcription_chunks WHERE job_id = ?", (job_id,))
+
+            # Delete job
+            self.conn.execute("DELETE FROM transcription_jobs WHERE id = ?", (job_id,))
+
+            self.conn.commit()
+            logger.info(f"Deleted job {job_id} and its chunks")
+
+        except sqlite3.Error as e:
+            logger.error(f"Error deleting job: {e}")
+            raise RuntimeError(f"Failed to delete job: {e}")
+
+    def cleanup_old_jobs(self, days: int = 30) -> int:
+        """
+        Delete completed/failed jobs older than specified days.
+
+        Args:
+            days: Number of days to keep
+
+        Returns:
+            Number of jobs deleted
+        """
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_str = cutoff_date.strftime('%Y-%m-%d %H:%M:%S')
+
+            # Get job IDs to delete
+            cursor = self.conn.execute("""
+                SELECT id FROM transcription_jobs
+                WHERE status IN (3, 4, 5)
+                AND completed_at < ?
+            """, (cutoff_str,))
+
+            job_ids = [row[0] for row in cursor.fetchall()]
+
+            if not job_ids:
+                logger.info("No old jobs to clean up")
+                return 0
+
+            # Delete chunks for these jobs
+            placeholders = ','.join('?' * len(job_ids))
+            self.conn.execute(
+                f"DELETE FROM transcription_chunks WHERE job_id IN ({placeholders})",
+                job_ids
+            )
+
+            # Delete jobs
+            self.conn.execute(
+                f"DELETE FROM transcription_jobs WHERE id IN ({placeholders})",
+                job_ids
+            )
+
+            self.conn.commit()
+            logger.info(f"Cleaned up {len(job_ids)} old jobs")
+            return len(job_ids)
+
+        except sqlite3.Error as e:
+            logger.error(f"Error cleaning up jobs: {e}")
+            raise RuntimeError(f"Failed to cleanup jobs: {e}")
+
+    # ==================== End of Job Management Methods ====================
 
     def close(self) -> None:
         """Close database connection"""

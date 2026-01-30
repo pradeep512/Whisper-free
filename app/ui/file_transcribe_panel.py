@@ -18,8 +18,10 @@ from PySide6.QtGui import QDesktopServices
 from pathlib import Path
 import logging
 
-from app.core.file_transcription_worker import FileTranscriptionWorker
 from app.core.audio_file_loader import AudioFileLoader, AudioLoadError
+from app.core.transcription_queue_manager import JobPriority
+from app.core.transcription_formats import TranscriptionFormatter
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ class FileTranscribePanel(QWidget):
     # Signals
     file_transcribed = Signal(dict)  # Emitted when transcription completes
 
-    def __init__(self, config_manager, whisper_engine, db_manager, parent=None):
+    def __init__(self, config_manager, whisper_engine, db_manager, queue_manager, parent=None):
         """
         Initialize file transcribe panel.
 
@@ -47,17 +49,18 @@ class FileTranscribePanel(QWidget):
             config_manager: ConfigManager instance
             whisper_engine: WhisperEngine instance
             db_manager: DatabaseManager instance
+            queue_manager: TranscriptionQueueManager instance
             parent: Parent widget
         """
         super().__init__(parent)
         self.config = config_manager
         self.whisper_engine = whisper_engine
         self.db_manager = db_manager
+        self.queue_manager = queue_manager
 
         # State
         self.selected_file_path = None
-        self.current_worker = None
-        self.current_thread = None
+        self.current_job_id = None
         self.last_output_path = None
         self.last_transcription_text = ""
 
@@ -393,38 +396,231 @@ class FileTranscribePanel(QWidget):
         if not self.selected_file_path:
             return
 
-        logger.info(f"Starting transcription: {self.selected_file_path}")
+        logger.info(f"Starting transcription via queue manager: {self.selected_file_path}")
 
         # Disable UI during transcription
         self._set_ui_enabled(False)
 
         # Reset progress
         self.progress_bar.setValue(0)
-        self.status_label.setText("Initializing...")
+        self.status_label.setText("Queued...")
 
-        # Create worker thread
-        self.current_thread = QThread()
-        self.current_worker = FileTranscriptionWorker(
-            self.selected_file_path,
-            self.whisper_engine,
-            self.config
+        # Get transcription settings from config
+        language = self.config.get('whisper.language')  # None for auto-detect
+        settings = {
+            'beam_size': self.config.get('whisper.beam_size', 1),
+            'temperature': self.config.get('whisper.temperature', 0.0),
+            'best_of': self.config.get('whisper.best_of', 1),
+        }
+
+        # Submit to queue manager (NORMAL priority for file transcription)
+        self.current_job_id = self.queue_manager.submit_file_job(
+            file_path=self.selected_file_path,
+            language=language,
+            settings=settings,
+            priority=JobPriority.NORMAL,
+            on_progress=self._on_queue_progress,
+            on_complete=self._on_queue_complete
         )
-        self.current_worker.moveToThread(self.current_thread)
 
-        # Connect signals
-        self.current_worker.progress_changed.connect(self._on_progress_changed)
-        self.current_worker.transcription_complete.connect(self._on_transcription_complete)
-        self.current_worker.transcription_failed.connect(self._on_transcription_failed)
-        self.current_thread.started.connect(self.current_worker.run)
+        logger.info(f"Submitted file job {self.current_job_id} to queue")
 
-        # Cleanup on finish
-        self.current_worker.transcription_complete.connect(self.current_thread.quit)
-        self.current_worker.transcription_failed.connect(self.current_thread.quit)
-        self.current_thread.finished.connect(self._cleanup_worker)
+    def _on_queue_progress(self, progress: int):
+        """Handle progress update from queue manager"""
+        self.progress_bar.setValue(progress)
+        if progress == 0:
+            self.status_label.setText("Loading audio...")
+        elif progress < 100:
+            self.status_label.setText(f"Transcribing... {progress}%")
+        else:
+            self.status_label.setText("Finalizing...")
+        logger.debug(f"Progress: {progress}%")
 
-        # Start thread
-        self.current_thread.start()
-        logger.info("Worker thread started")
+    def _on_queue_complete(self, result_text: str, result_data: dict):
+        """Handle completion from queue manager"""
+        logger.info("File transcription complete via queue manager")
+
+        try:
+            # Extract result data from Whisper result
+            language = result_data.get('language', 'unknown')
+            duration = 0.0
+            if 'segments' in result_data and result_data['segments']:
+                last_segment = result_data['segments'][-1]
+                duration = last_segment.get('end', 0.0)
+
+            # Save output files
+            output_paths = self._save_output_files(result_text, result_data)
+            output_path = output_paths[0] if output_paths else ""
+
+            # Display result
+            self.result_text_edit.setPlainText(result_text)
+            self.last_transcription_text = result_text
+            self.last_output_path = output_path
+
+            # Show created files
+            if len(output_paths) == 1:
+                self.output_path_label.setText(f"Saved to: {output_paths[0]}")
+            else:
+                files_list = "\n  • ".join([Path(p).name for p in output_paths])
+                self.output_path_label.setText(
+                    f"Created {len(output_paths)} files:\n  • {files_list}"
+                )
+
+            # Enable result buttons
+            self.copy_button.setEnabled(True)
+            self.open_button.setEnabled(True)
+
+            # Update status
+            self.status_label.setText(f"Complete! ({len(result_text)} characters, {language})")
+            self.status_label.setStyleSheet("color: #00ff00; font-style: italic;")
+
+            # Add to database if enabled
+            add_to_history = self.config.get('file_transcribe.add_to_history', True)
+            if add_to_history:
+                model_used = self.config.get('whisper.model', 'small')
+                self.db_manager.add_transcription(
+                    text=result_text,
+                    language=language,
+                    duration=duration,
+                    model_used=model_used,
+                    audio_path=self.selected_file_path,
+                    source_type='file',
+                    output_path=output_path
+                )
+                logger.info("Added file transcription to database")
+
+            # Emit signal
+            self.file_transcribed.emit({
+                'text': result_text,
+                'language': language,
+                'duration': duration,
+                'output_path': output_path,
+                'output_paths': output_paths,
+                'audio_file': self.selected_file_path
+            })
+
+            # Auto-open if configured
+            auto_open = self.config.get('file_transcribe.auto_open_output', False)
+            if auto_open and output_path:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(output_path))
+
+            # Success notification
+            formats_created = ", ".join([Path(p).suffix[1:].upper() for p in output_paths])
+            QMessageBox.information(
+                self,
+                "Transcription Complete",
+                f"File transcribed successfully!\n\n"
+                f"Text: {len(result_text)} characters\n"
+                f"Language: {language}\n"
+                f"Files created: {len(output_paths)} ({formats_created})"
+            )
+
+        except Exception as e:
+            logger.error(f"Error handling transcription result: {e}", exc_info=True)
+            self._on_transcription_failed(str(e))
+
+        finally:
+            # Re-enable UI
+            self._set_ui_enabled(True)
+            self.current_job_id = None
+
+    def _save_output_files(self, text: str, result_data: dict) -> list:
+        """
+        Save transcription to multiple formats based on config.
+
+        Args:
+            text: Plain text transcription
+            result_data: Full Whisper result with segments
+
+        Returns:
+            List of created file paths (.txt file is always first)
+        """
+        try:
+            audio_path = Path(self.selected_file_path)
+            timestamp_duplicates = self.config.get('file_transcribe.timestamp_duplicates', True)
+
+            # Get enabled output formats
+            output_formats = self.config.get('file_transcribe.output_formats', {
+                'txt': True,
+                'srt': False,
+                'vtt': False,
+                'json': False,
+                'tsv': False
+            })
+
+            # Ensure at least txt is enabled
+            if not any(output_formats.values()):
+                output_formats['txt'] = True
+                logger.warning("No output formats enabled, defaulting to txt")
+
+            created_files = []
+
+            # Generate base name (with timestamp if needed)
+            base_output_path = audio_path.with_suffix('.txt')
+            base_name = audio_path.stem
+
+            if base_output_path.exists() and timestamp_duplicates:
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                base_name = f"{audio_path.stem}_{timestamp}"
+                logger.info(f"Output file exists, using timestamp: {base_name}")
+
+            # Save each enabled format
+            formatter = TranscriptionFormatter()
+            for format_name, enabled in output_formats.items():
+                if not enabled:
+                    continue
+
+                try:
+                    # Generate output path
+                    output_path = audio_path.parent / f"{base_name}.{format_name}"
+
+                    # Convert to format
+                    if format_name == 'txt':
+                        content = text
+                    elif format_name == 'srt':
+                        content = formatter.to_srt(result_data)
+                    elif format_name == 'vtt':
+                        content = formatter.to_vtt(result_data)
+                    elif format_name == 'json':
+                        content = formatter.to_json(result_data)
+                    elif format_name == 'tsv':
+                        content = formatter.to_tsv(result_data)
+                    else:
+                        logger.warning(f"Unknown format: {format_name}")
+                        continue
+
+                    # Write file
+                    logger.info(f"Writing {format_name.upper()} to: {output_path}")
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+
+                    # Verify
+                    if not output_path.exists():
+                        logger.error(f"Failed to create {format_name} file")
+                        continue
+
+                    file_size = output_path.stat().st_size
+                    logger.info(f"{format_name.upper()} saved: {file_size} bytes")
+
+                    # Add to created files (txt first)
+                    if format_name == 'txt':
+                        created_files.insert(0, str(output_path))
+                    else:
+                        created_files.append(str(output_path))
+
+                except Exception as e:
+                    logger.error(f"Error saving {format_name} format: {e}")
+                    # Continue with other formats
+
+            if not created_files:
+                raise IOError("Failed to create any output files")
+
+            logger.info(f"Successfully created {len(created_files)} file(s)")
+            return created_files
+
+        except Exception as e:
+            logger.error(f"Error saving transcription files: {e}", exc_info=True)
+            raise IOError(f"Failed to save transcription: {str(e)}")
 
     def _on_progress_changed(self, percentage: int, message: str):
         """Handle progress update from worker"""
@@ -476,7 +672,8 @@ class FileTranscribePanel(QWidget):
                     language=language,
                     duration=duration,
                     model_used=model_used,
-                    audio_path=audio_file
+                    audio_path=audio_file,
+                    source_type='file'  # Mark as file transcription
                 )
                 logger.info("Added file transcription to database")
 

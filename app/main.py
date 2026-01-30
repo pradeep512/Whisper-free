@@ -27,6 +27,7 @@ from app.core.whisper_engine import WhisperEngine
 from app.core.audio_capture import AudioRecorder
 from app.core.hotkey_manager import HotkeyManager
 from app.core.state_machine import StateMachine, ApplicationState
+from app.core.transcription_queue_manager import TranscriptionQueueManager
 
 # UI components
 from app.ui.overlay import DynamicIslandOverlay, OverlayMode
@@ -162,6 +163,7 @@ class WhisperFreeApp(QObject):
     start_stop_recording_signal = Signal() # Signal to trigger stop recording worker
     start_recording_signal = Signal() # Signal to trigger start recording worker
     start_model_load_signal = Signal(str) # Signal to trigger model loading
+    ptt_transcription_complete_signal = Signal(str, str, float)  # text, language, duration (for thread-safe callback)
 
     def __init__(self):
         super().__init__()
@@ -236,6 +238,14 @@ class WhisperFreeApp(QObject):
             )
             sys.exit(1)
 
+        # Transcription Queue Manager (prevents KV cache corruption)
+        logger.info("Initializing transcription queue manager...")
+        self.queue_manager = TranscriptionQueueManager(
+            whisper_engine=self.whisper,
+            db_manager=self.db
+        )
+        logger.info("Queue manager initialized")
+
         # Audio recorder
         try:
             audio_device = self.config.get('audio.device', None)
@@ -278,7 +288,7 @@ class WhisperFreeApp(QObject):
         
         self.start_recording_signal.connect(self.start_recording_worker.start)
         self.start_recording_worker.finished.connect(self.on_recording_started)
-        self.start_recording_worker.error.connect(self.on_recording_error)
+        self.start_recording_worker.error.connect(self.on_start_recording_error)
         
         self.start_recording_thread.start()
 
@@ -289,7 +299,7 @@ class WhisperFreeApp(QObject):
         
         self.start_stop_recording_signal.connect(self.stop_recording_worker.stop)
         self.stop_recording_worker.finished.connect(self.on_recording_stopped)
-        self.stop_recording_worker.error.connect(self.on_recording_error)
+        self.stop_recording_worker.error.connect(self.on_stop_recording_error)
         
         self.stop_recording_thread.start()
 
@@ -301,8 +311,6 @@ class WhisperFreeApp(QObject):
         self.start_transcription_signal.connect(self.transcription_worker.transcribe)
         self.transcription_worker.finished.connect(self.on_transcription_complete)
         self.transcription_worker.error.connect(self.on_transcription_error)
-        
-        self.transcription_thread.start()
         
         self.transcription_thread.start()
         
@@ -331,7 +339,7 @@ class WhisperFreeApp(QObject):
         self.overlay.set_position(position, monitor)
 
         # Main window
-        self.main_window = MainWindow(self.db, self.config, self.whisper)
+        self.main_window = MainWindow(self.db, self.config, self.whisper, self.queue_manager)
 
         # Update initial VRAM display
         vram_usage = self.whisper.get_vram_usage()
@@ -364,6 +372,14 @@ class WhisperFreeApp(QObject):
         # Overlay Controls
         self.overlay.cancel_requested.connect(self.cancel_recording)
         self.overlay.stop_requested.connect(self.stop_recording)
+
+        # Queue Manager → Job lifecycle
+        self.queue_manager.job_started.connect(self._on_job_started)
+        self.queue_manager.job_completed.connect(self._on_job_completed)
+        self.queue_manager.job_failed.connect(self._on_job_failed)
+
+        # PTT completion signal (thread-safe bridge from worker to main thread)
+        self.ptt_transcription_complete_signal.connect(self.on_transcription_complete)
 
     def on_hotkey_pressed(self):
         """
@@ -412,15 +428,15 @@ class WhisperFreeApp(QObject):
         # Start waveform updates (30 FPS)
         self.waveform_timer.start(33)
 
-    def on_recording_error(self, error_message):
-        """Handle error during recording start/stop"""
-        logger.error(f"Recording error: {error_message}")
+    def on_start_recording_error(self, error_message):
+        """Handle error during recording start"""
+        logger.error(f"Start recording error: {error_message}")
         self.waveform_timer.stop() # Ensure timer is stopped
         self.state.transition_to(ApplicationState.ERROR, error_message)
         QMessageBox.critical(
             self.main_window,
             "Recording Error",
-            f"Recording failed.\n\n{error_message}"
+            f"Failed to start recording.\n\n{error_message}"
         )
 
     def stop_recording(self):
@@ -462,9 +478,9 @@ class WhisperFreeApp(QObject):
         # Store audio data
         self.last_audio_data = audio_data
 
-        # Start transcription
-        logger.info("Starting transcription...")
-        
+        # Submit transcription job to queue manager
+        logger.info("Submitting PTT transcription job to queue...")
+
         # Prepare settings
         language = self.config.get('whisper.language', None)
         settings = {
@@ -472,18 +488,49 @@ class WhisperFreeApp(QObject):
             'temperature': self.config.get('whisper.temperature', 0.0),
             'fp16': self.config.get('whisper.fp16', True)
         }
-        
-        # Trigger worker via signal
-        self.start_transcription_signal.emit(self.last_audio_data, language, settings)
 
-    def on_recording_error(self, error_message):
+        # Submit high-priority PTT job (uses queue manager for exclusive model access)
+        job_id = self.queue_manager.submit_ptt_job(
+            audio_data=self.last_audio_data,
+            language=language,
+            settings=settings,
+            on_complete=self._on_ptt_transcription_complete
+        )
+
+        logger.info(f"PTT job {job_id} submitted to queue")
+
+    def _on_ptt_transcription_complete(self, text: str, result_data: dict):
+        """
+        Callback when PTT transcription completes (called from queue manager worker thread).
+
+        This method is called from the background worker thread, so we must use signals
+        to communicate back to the main Qt thread for UI updates.
+
+        Args:
+            text: Transcribed text
+            result_data: Full Whisper result dictionary
+        """
+        # Extract metadata from result
+        language = result_data.get('language', 'en')
+
+        # Calculate duration from segments if available
+        segments = result_data.get('segments', [])
+        if segments:
+            duration = segments[-1].get('end', 0.0)
+        else:
+            duration = 0.0
+
+        # Emit signal to main thread (Qt signals are thread-safe)
+        # This will trigger on_transcription_complete() in the main thread
+        self.ptt_transcription_complete_signal.emit(text, language, duration)
+
+    def on_stop_recording_error(self, error_message):
         """Handle error during stop recording"""
-        logger.error(f"Error stopping recording: {error_message}")
+        logger.error(f"Stop recording error: {error_message}")
         self.state.transition_to(ApplicationState.ERROR, error_message)
         QMessageBox.critical(
             self.main_window,
             "Recording Error",
-            f"Failed to stop recording.\n\n{error_message}"
             f"Failed to stop recording.\n\n{error_message}"
         )
 
@@ -703,6 +750,26 @@ class WhisperFreeApp(QObject):
 
         # Show confirmation in overlay
         self.overlay.show_copied_confirmation()
+
+    def _on_job_started(self, job_id: str):
+        """Handle queue manager job started signal."""
+        logger.debug(f"Job {job_id} started")
+        # PTT jobs are already handled by state machine
+        # File jobs will be handled by their respective panels
+
+    def _on_job_completed(self, job_id: str, text: str, result_data: dict):
+        """Handle queue manager job completed signal."""
+        logger.debug(f"Job {job_id} completed")
+        # PTT completion is handled via callback
+        # File completion is handled by FileTranscribePanel
+
+    def _on_job_failed(self, job_id: str, error_message: str):
+        """Handle queue manager job failed signal."""
+        logger.error(f"Job {job_id} failed: {error_message}")
+
+        # If this is a PTT job, show error
+        if job_id.startswith('ptt_'):
+            self.on_transcription_error(error_message)
 
     def run(self):
         """Start the application"""

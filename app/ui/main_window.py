@@ -19,6 +19,7 @@ import logging
 from app.ui.history_panel import HistoryPanel
 from app.ui.settings_panel import SettingsPanel
 from app.ui.file_transcribe_panel import FileTranscribePanel
+from app.ui.batch_transcribe_panel import BatchTranscribePanel
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class MainWindow(QMainWindow):
     # Signals
     settings_changed = Signal()  # Emitted when user saves settings
 
-    def __init__(self, db_manager, config_manager, whisper_engine=None):
+    def __init__(self, db_manager, config_manager, whisper_engine=None, queue_manager=None):
         """
         Initialize main window
 
@@ -40,11 +41,13 @@ class MainWindow(QMainWindow):
             db_manager: DatabaseManager instance
             config_manager: ConfigManager instance
             whisper_engine: WhisperEngine instance (optional, for file transcription)
+            queue_manager: TranscriptionQueueManager instance (optional, for job management)
         """
         super().__init__()
         self.db = db_manager
         self.config = config_manager
         self.whisper_engine = whisper_engine
+        self.queue_manager = queue_manager
 
         # Store panels
         self.history_panel = None
@@ -126,7 +129,7 @@ class MainWindow(QMainWindow):
         self.sidebar.clear()
 
         # Top items
-        for text in ["History", "File Transcribe", "Settings"]:
+        for text in ["History", "File Transcribe", "Batch Files", "Settings"]:
             item = QListWidgetItem(text)
             item.setSizeHint(QSize(140, 45))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -143,12 +146,13 @@ class MainWindow(QMainWindow):
         # Create panels
         self.history_panel = HistoryPanel(self.db)
 
-        # File transcribe panel (only if whisper_engine is available)
-        if self.whisper_engine:
+        # File transcribe panel (only if whisper_engine and queue_manager are available)
+        if self.whisper_engine and self.queue_manager:
             self.file_transcribe_panel = FileTranscribePanel(
                 self.config,
                 self.whisper_engine,
-                self.db
+                self.db,
+                self.queue_manager
             )
         else:
             # Create placeholder if engine not available
@@ -157,14 +161,29 @@ class MainWindow(QMainWindow):
                 "File transcription requires WhisperEngine.\nPlease restart the application."
             )
 
+        # Batch transcribe panel (only if queue_manager is available)
+        if self.queue_manager:
+            self.batch_transcribe_panel = BatchTranscribePanel(
+                self.queue_manager,
+                self.config,
+                self.db
+            )
+        else:
+            # Create placeholder if queue manager not available
+            self.batch_transcribe_panel = self._create_placeholder_panel(
+                "Batch Files",
+                "Batch transcription requires TranscriptionQueueManager.\nPlease restart the application."
+            )
+
         self.settings_panel = SettingsPanel(self.config)
         self.about_panel = self._create_about_panel()
 
         # Add panels to stack (order matches sidebar)
-        self.stack.addWidget(self.history_panel)          # Index 0
-        self.stack.addWidget(self.file_transcribe_panel)  # Index 1
-        self.stack.addWidget(self.settings_panel)         # Index 2
-        self.stack.addWidget(self.about_panel)            # Index 3
+        self.stack.addWidget(self.history_panel)           # Index 0
+        self.stack.addWidget(self.file_transcribe_panel)   # Index 1
+        self.stack.addWidget(self.batch_transcribe_panel)  # Index 2
+        self.stack.addWidget(self.settings_panel)          # Index 3
+        self.stack.addWidget(self.about_panel)             # Index 4
 
         # Connect settings panel signals
         self.settings_panel.settings_saved.connect(self.settings_changed.emit)
