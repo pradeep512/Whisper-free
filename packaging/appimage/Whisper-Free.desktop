@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Whisper-Free
+Comment=Local, privacy-first speech-to-text with overlay
+Exec=Whisper-Free
+Icon=app-icon-512
+Terminal=false
+Categories=AudioVideo;Utility;
+StartupWMClass=Whisper-Free

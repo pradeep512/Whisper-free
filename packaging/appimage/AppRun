@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+set -e
+
+# Default to XWayland on GNOME Wayland for reliable overlay positioning
+FORCE_XWAYLAND=0
+ARGS=""
+for arg in "$@"; do
+  if [ "$arg" = "--xwayland" ]; then
+    FORCE_XWAYLAND=1
+  elif [ "$arg" = "--wayland" ]; then
+    FORCE_XWAYLAND=0
+  else
+    ARGS="$ARGS\n$arg"
+  fi
+done
+# rebuild args safely
+set --
+IFS='\n'
+for arg in $ARGS; do
+  [ -n "$arg" ] && set -- "$@" "$arg"
+done
+unset IFS
+
+if [ "${WHISPER_FORCE_XWAYLAND:-}" = "1" ]; then
+  FORCE_XWAYLAND=1
+fi
+if [ "${WHISPER_FORCE_XWAYLAND:-}" = "0" ]; then
+  FORCE_XWAYLAND=0
+fi
+
+if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] && [ "$FORCE_XWAYLAND" = "0" ]; then
+  FORCE_XWAYLAND=1
+fi
+
+if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] && [ "$FORCE_XWAYLAND" = "1" ]; then
+  export QT_QPA_PLATFORM=xcb
+fi
+
+exec "$APPDIR/usr/bin/Whisper-Free" "$@"
