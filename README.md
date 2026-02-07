@@ -4,9 +4,7 @@ Whisper-Free is a local, privacy-first speech-to-text desktop app with a lightwe
 
 ## Demo Video
 
-Watch the demo video:
-
-https://github.com/pradeep512/Whisper-free/releases/download/v0.1.0/Demo_Video.mp4
+![Whisper-Free Demo](assets/demo.gif)
 
 ## Screenshots
 
