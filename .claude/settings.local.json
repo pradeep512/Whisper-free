@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(python3:*)",
+      "Bash(pip3 list:*)",
+      "Bash(ls:*)",
+      "Bash(while read file)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(done)",
+      "Bash(tree:*)",
+      "Bash(pip3 install:*)",
+      "Bash(venv/bin/pip install:*)",
+      "Bash(venv/bin/python:*)",
+      "Bash(QT_QPA_PLATFORM=offscreen venv/bin/python:*)",
+      "Bash(timeout 5 bash:*)",
+      "Bash(pkill:*)",
+      "Bash(timeout 10 env QT_QPA_PLATFORM=offscreen venv/bin/python:*)",
+      "Bash(if [ -f /tmp/claude/-home-kalicobra477-github-Whisper-free/tasks/b1bacc8.output ])",
+      "Bash(then cat /tmp/claude/-home-kalicobra477-github-Whisper-free/tasks/b1bacc8.output)",
+      "Bash(else echo \"Still running...\")",
+      "Bash(fi)",
+      "Bash(/home/kalicobra477/github/Whisper-free/venv/bin/python:*)",
+      "Bash(wc:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(pip install:*)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest:*)",
+      "Bash(python -c:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(grep:*)",
+      "Bash(python:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(echo:*)",
+      "Bash(xdpyinfo:*)",
+      "Bash(export DISPLAY=:1)"
+    ]
+  }
+}
