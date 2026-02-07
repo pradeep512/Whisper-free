@@ -37,7 +37,7 @@ Whisper-Free is a local, privacy-first speech-to-text desktop app with a lightwe
 - FFmpeg (required for MP3/M4A/WebM file transcription)
 - Atleast 2GB VGA
 
-## Install
+## Install using git repo
 
 ```bash
 # 1) Clone
@@ -131,6 +131,62 @@ See `archive/docs/README_FILE_TRANSCRIPTION.md` for detailed file transcription 
 - `scripts/whisper` CLI entry point
 - `configs/` config templates
 - `assets/` optional demo video and media
+
+
+
+## Install using AppImage (Split Parts)
+
+Large AppImage files are provided as split parts in the GitHub Release assets.
+Download all parts into the same folder, then reassemble:
+
+```bash
+cat Whisper-Free-x86_64.AppImage.part.* > Whisper-Free-x86_64.AppImage
+chmod +x Whisper-Free-x86_64.AppImage
+```
+
+Optional checksum verification (if the release provides a `.sha256` file):
+
+```bash
+sha256sum -c Whisper-Free-x86_64.AppImage.sha256
+```
+
+Run the AppImage:
+
+```bash
+./Whisper-Free-x86_64.AppImage
+```
+
+### Show In App List (Desktop Menu)
+
+To make the AppImage appear in your app list/search, create a desktop entry:
+
+```bash
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/512x512/apps
+cp Whisper-Free-x86_64.AppImage ~/.local/bin/whisper-free
+chmod +x ~/.local/bin/whisper-free
+cp assets/app-icon-512.png ~/.local/share/icons/hicolor/512x512/apps/whisper-free.png
+```
+
+Create `~/.local/share/applications/whisper-free.desktop` with:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=Whisper-Free
+Comment=Local, privacy-first speech-to-text with overlay
+Exec=/home/your-user/.local/bin/whisper-free
+Icon=whisper-free
+Terminal=false
+Categories=AudioVideo;Utility;
+StartupWMClass=Whisper-Free
+```
+
+Then refresh desktop databases:
+
+```bash
+update-desktop-database ~/.local/share/applications
+gtk-update-icon-cache ~/.local/share/icons/hicolor
+```
 
 ## License
 

@@ -176,6 +176,10 @@ class WhisperFreeApp(QObject):
 
         self.app.setApplicationName("Whisper-Free")
         self.app.setOrganizationName("Whisper-Free")
+        self.app.setQuitOnLastWindowClosed(False)
+        self._cleanup_done = False
+        self._exit_requested = False
+        self.app.aboutToQuit.connect(self.cleanup)
 
         # Configuration directory
         self.config_dir = Path.home() / ".config" / "whisper-free"
@@ -348,6 +352,7 @@ class WhisperFreeApp(QObject):
 
         # Main window
         self.main_window = MainWindow(self.db, self.config, self.whisper, self.queue_manager)
+        self.main_window.exit_requested.connect(self.request_exit)
 
         # Update initial VRAM display
         vram_usage = self.whisper.get_vram_usage()
@@ -834,7 +839,20 @@ class WhisperFreeApp(QObject):
 
     def cleanup(self):
         """Cleanup resources before exit"""
+        if getattr(self, "_cleanup_done", False):
+            return
+        self._cleanup_done = True
+
         logger.info("Cleaning up...")
+
+        def _stop_qthread(thread: QThread, name: str):
+            if thread and thread.isRunning():
+                thread.quit()
+                if not thread.wait(2000):
+                    logger.warning(f"{name} did not stop in time; terminating")
+                    thread.terminate()
+                    thread.wait(1000)
+                logger.info(f"{name} stopped")
 
         # Stop IPC server
         if hasattr(self, 'ipc_server'):
@@ -843,9 +861,7 @@ class WhisperFreeApp(QObject):
         # Stop hotkey listener
         if self.hotkey_thread.isRunning():
             self.hotkey.stop()
-            self.hotkey_thread.quit()
-            self.hotkey_thread.wait()
-            logger.info("Hotkey listener stopped")
+            _stop_qthread(self.hotkey_thread, "Hotkey listener thread")
 
         # Stop worker thread
         if hasattr(self, 'worker_thread') and self.worker_thread.isRunning():
@@ -854,22 +870,27 @@ class WhisperFreeApp(QObject):
             logger.info("Worker thread stopped")
 
         # Stop Recording worker thread
-        if hasattr(self, 'stop_recording_thread') and self.stop_recording_thread.isRunning():
-            self.stop_recording_thread.quit()
-            self.stop_recording_thread.wait()
-            logger.info("Stop Recording worker thread stopped")
+        if hasattr(self, 'stop_recording_thread'):
+            _stop_qthread(self.stop_recording_thread, "Stop recording thread")
 
         # Start Recording worker thread
-        if hasattr(self, 'start_recording_thread') and self.start_recording_thread.isRunning():
-            self.start_recording_thread.quit()
-            self.start_recording_thread.wait()
-            logger.info("Start Recording worker thread stopped")
+        if hasattr(self, 'start_recording_thread'):
+            _stop_qthread(self.start_recording_thread, "Start recording thread")
 
-        # Stop Start Recording worker thread
-        if hasattr(self, 'start_recording_thread') and self.start_recording_thread.isRunning():
-            self.start_recording_thread.quit()
-            self.start_recording_thread.wait()
-            logger.info("Start Recording worker thread stopped")
+        # Transcription worker thread
+        if hasattr(self, 'transcription_thread'):
+            _stop_qthread(self.transcription_thread, "Transcription thread")
+
+        # Model loader thread
+        if hasattr(self, 'model_loader_thread'):
+            _stop_qthread(self.model_loader_thread, "Model loader thread")
+
+        # Stop queue manager thread
+        if hasattr(self, 'queue_manager') and self.queue_manager:
+            try:
+                self.queue_manager.shutdown()
+            except Exception:
+                pass
 
         # Stop audio if recording
         if self.state.current_state == ApplicationState.RECORDING:
@@ -894,6 +915,31 @@ class WhisperFreeApp(QObject):
             pass
 
         logger.info("Cleanup complete")
+
+    def request_exit(self):
+        """Hide UI instantly, then perform shutdown and quit."""
+        if self._exit_requested:
+            return
+        self._exit_requested = True
+
+        # Hide UI immediately for snappy close
+        try:
+            if self.overlay:
+                self.overlay.set_mode(OverlayMode.HIDDEN)
+        except Exception:
+            pass
+        try:
+            self.main_window.hide()
+        except Exception:
+            pass
+
+        # Run cleanup after UI is hidden
+        QTimer.singleShot(0, self._finalize_exit)
+
+    def _finalize_exit(self):
+        """Perform cleanup and quit the app."""
+        self.cleanup()
+        self.app.quit()
 
 
 def main():

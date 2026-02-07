@@ -2,12 +2,15 @@
 
 
 from PyInstaller.utils.hooks import collect_data_files
+from pathlib import Path
+
+ROOT = Path(SPECPATH).resolve().parents[1]
 
 whisper_datas = collect_data_files('whisper')
 
 a = Analysis(
-    ['app/main.py'],
-    pathex=[],
+    [str(ROOT / 'app' / 'main.py')],
+    pathex=[str(ROOT)],
     binaries=[],
     datas=whisper_datas,
     hiddenimports=[
