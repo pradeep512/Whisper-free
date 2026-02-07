@@ -8,8 +8,6 @@ Whisper-Free is a local, privacy-first speech-to-text desktop app with a lightwe
 
 ## Screenshots
 
-Add the screenshots below (see suggested filenames) and they will render as a grid.
-
 <table>
   <tr>
     <td><img src="assets/ui-history.png" width="420" alt="Transcription History"/></td>
@@ -37,6 +35,7 @@ Add the screenshots below (see suggested filenames) and they will render as a gr
 - Linux (tested on GNOME)
 - Python 3.10+
 - FFmpeg (required for MP3/M4A/WebM file transcription)
+- Atleast 2GB VGA
 
 ## Install
 
