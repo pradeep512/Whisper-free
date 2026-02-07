@@ -117,7 +117,7 @@ This toggles recording start/stop and triggers transcription + clipboard copy.
 
 Open the "File Transcribe" tab and select an audio file. WAV/FLAC/OGG work without extra dependencies. For MP3/M4A/WebM, install ffmpeg.
 
-See `README_FILE_TRANSCRIPTION.md` for detailed file transcription guidance.
+See `archive/docs/README_FILE_TRANSCRIPTION.md` for detailed file transcription guidance.
 
 ## Troubleshooting
 
