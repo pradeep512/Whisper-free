@@ -13,9 +13,45 @@ import torch
 import numpy as np
 from typing import Optional, Dict, Any
 import logging
+import io
+import pkgutil
+from functools import lru_cache
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def _patch_whisper_assets() -> None:
+    """
+    Ensure Whisper assets (mel_filters.npz) load correctly in packaged builds.
+
+    In some frozen environments, file-based assets may not be found even though
+    they are bundled. This patch adds a fallback that loads the asset from the
+    package data via pkgutil when the file path is missing.
+    """
+    try:
+        from whisper import audio as whisper_audio
+    except Exception:
+        return
+
+    if getattr(whisper_audio, "_wf_patched", False):
+        return
+
+    original = whisper_audio.mel_filters
+
+    @lru_cache(maxsize=None)
+    def mel_filters(device, n_mels: int):
+        try:
+            return original(device, n_mels)
+        except FileNotFoundError:
+            data = pkgutil.get_data("whisper", "assets/mel_filters.npz")
+            if data is None:
+                raise
+            with np.load(io.BytesIO(data), allow_pickle=False) as f:
+                return torch.from_numpy(f[f"mel_{n_mels}"]).to(device)
+
+    whisper_audio.mel_filters = mel_filters
+    whisper_audio._wf_patched = True
 
 
 class WhisperEngine:
@@ -99,6 +135,9 @@ class WhisperEngine:
             )
             logger.error(error_msg)
             raise ValueError(error_msg)
+
+        # Patch asset loading for frozen builds
+        _patch_whisper_assets()
 
         # Load the model
         self._load_model(model_name)

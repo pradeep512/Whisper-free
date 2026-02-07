@@ -48,3 +48,18 @@ whisper/
 archive/third_party/whisper/
 archive/venv/
 archive/cache/
+
+# Build artifacts
+build/
+dist/
+AppDir/
+squashfs-root/
+artifacts/
+
+# AppImage outputs/tools
+release/
+*.AppImage
+runtime-x86_64
+linuxdeploy-*.AppImage
+appimagetool-*.AppImage
+tools/
