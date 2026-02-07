@@ -9,7 +9,7 @@ Provides the main UI for Whisper-Free with:
 """
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
     QListWidget, QListWidgetItem, QLabel, QStatusBar, QPushButton
 )
 from PySide6.QtCore import Signal, Qt, QSize
@@ -34,6 +34,7 @@ class MainWindow(QMainWindow):
     # Signals
     settings_changed = Signal()  # Emitted when user saves settings
     ptt_toggle_requested = Signal()  # Emitted when user clicks PTT button
+    exit_requested = Signal()  # Emitted when user closes the window
 
     def __init__(self, db_manager, config_manager, whisper_engine=None, queue_manager=None):
         """
@@ -82,6 +83,14 @@ class MainWindow(QMainWindow):
         self._load_history()
 
         logger.info("MainWindow initialized")
+
+    def closeEvent(self, event):
+        """
+        Hide immediately for instant UI close, then request app shutdown.
+        """
+        self.hide()
+        self.exit_requested.emit()
+        event.ignore()
 
     def _setup_ui(self):
         """Create sidebar, panels, status bar"""
