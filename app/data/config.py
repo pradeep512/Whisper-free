@@ -51,7 +51,7 @@ class ConfigManager:
             'enabled': True,
             'position': 'top-center',
             'monitor': 0,
-            'auto_dismiss_ms': 2500,
+            'auto_dismiss_ms': 1000,
         },
         'ui': {
             'theme': 'dark',
@@ -80,7 +80,7 @@ class ConfigManager:
 
     # Valid values for validation
     VALID_MODELS = ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
-    VALID_POSITIONS = ['top-center', 'top-left', 'top-right', 'bottom-center']
+    VALID_POSITIONS = ['top-center', 'top-left', 'top-right', 'bottom-center', 'bottom-left', 'bottom-right']
 
     def __init__(self, config_path: str = "~/.config/whisper-free/config.yaml"):
         """

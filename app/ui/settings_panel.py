@@ -326,7 +326,7 @@ class SettingsPanel(QWidget):
 
         # Position dropdown
         position_combo = QComboBox()
-        position_combo.addItems(['top-center', 'top-left', 'top-right', 'bottom-center'])
+        position_combo.addItems(['top-center', 'top-left', 'top-right', 'bottom-center', 'bottom-left', 'bottom-right'])
         position_combo.setStyleSheet(self._combo_style())
         self.widgets['overlay.position'] = position_combo
         form.addRow("Position:", position_combo)

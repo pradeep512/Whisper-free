@@ -13,6 +13,7 @@ License: MIT
 
 from enum import Enum
 import math
+import os
 import time
 from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout
 from PySide6.QtGui import QPainter, QColor, QPainterPath, QFont, QFontMetrics, QCursor
@@ -110,8 +111,10 @@ class DynamicIslandOverlay(QWidget):
         self._result_text = ""
         self._result_language = ""  # New: Store detected language
         self._target_geometry = QRect(0, 0, 0, 0)
-        self._position_setting = "top-right"    # Default to top-right (near clock)
+        self._position_setting = "top-center"   # Default to top-center
         self._monitor_setting = 0
+        self._auto_dismiss_ms = 1000            # Default auto-dismiss (1 second)
+        self._content_opacity = 0.0             # Use paint-based opacity (Wayland-safe)
         
         # Status info
         self._model_name = "Unknown"
@@ -148,7 +151,6 @@ class DynamicIslandOverlay(QWidget):
 
         # Initialize in hidden state
         self.setGeometry(0, 0, 0, 0)
-        self.setWindowOpacity(0.0)
 
         logger.info("DynamicIslandOverlay initialized")
 
@@ -159,17 +161,29 @@ class DynamicIslandOverlay(QWidget):
         Sets:
             - Frameless window
             - Always on top
-            - Tool window (no taskbar entry)
+            - Tool window (needed for positioning on Wayland)
             - Does not accept focus
             - Translucent background
+
+        On Wayland, Qt.Tool is required so the compositor allows client-side
+        positioning. Without it, Mutter treats the window as a top-level and
+        centers it. To prevent Mutter from auto-hiding the Tool window during
+        geometry changes, we skip geometry animation on Wayland and set
+        geometry directly instead.
         """
-        # Window flags for X11
-        self.setWindowFlags(
+        self._is_wayland = os.environ.get('XDG_SESSION_TYPE', '') == 'wayland'
+
+        flags = (
             Qt.FramelessWindowHint |
             Qt.WindowStaysOnTopHint |
             Qt.Tool |
             Qt.WindowDoesNotAcceptFocus
         )
+        if self._is_wayland:
+            # Try to bypass the compositor so client-side positioning works.
+            # Some compositors may ignore this, but it helps on GNOME in practice.
+            flags |= Qt.BypassWindowManagerHint
+        self.setWindowFlags(flags)
 
         # Enable mouse tracking for hover effects
         self.setMouseTracking(True)
@@ -225,28 +239,33 @@ class DynamicIslandOverlay(QWidget):
         # Calculate target geometry
         target_geometry = self._calculate_geometry(target_width, target_height)
 
-        # Fix for jitter/flying effect when appearing from HIDDEN
-        if old_mode == OverlayMode.HIDDEN:
-            # Set initial position to center of target, so it expands naturally
-            # instead of flying in from (0,0)
-            start_geo = QRect(target_geometry)
-            start_geo.setWidth(0)
-            start_geo.setHeight(0)
-            start_geo.moveCenter(target_geometry.center())
-            # For top alignment, keep top fixed? 
-            # Actually, standard center expansion is usually safest and looks like a "pop"
-            self.setGeometry(start_geo)
+        if self._is_wayland:
+            # On Wayland: set geometry directly (no animation) to avoid
+            # Mutter auto-hiding the Tool window during geometry transitions.
+            # Only animate opacity for visual smoothness.
+            if mode == OverlayMode.HIDDEN:
+                self._animate_opacity_only(target_opacity, on_done=self.hide)
+            else:
+                self._apply_geometry_wayland(target_geometry)
+                self._animate_opacity_only(target_opacity)
+                self.show()
+                self.raise_()
+        else:
+            # On X11: full geometry + opacity animation
+            if old_mode == OverlayMode.HIDDEN:
+                start_geo = QRect(target_geometry)
+                start_geo.setWidth(0)
+                start_geo.setHeight(0)
+                start_geo.moveCenter(target_geometry.center())
+                self.setGeometry(start_geo)
 
-        # Animate to new state
-        self._animate_to_geometry(target_geometry, target_opacity)
+            self._animate_to_geometry(target_geometry, target_opacity)
 
         # Start mode-specific timers
         if mode == OverlayMode.RESULT:
-            # Auto-dismiss after 2.5 seconds
-            self._auto_dismiss_timer.start(2500)
+            self._auto_dismiss_timer.start(self._auto_dismiss_ms)
         elif mode == OverlayMode.COPIED:
-            # Auto-dismiss after 1.5 seconds
-            self._auto_dismiss_timer.start(1500)
+            self._auto_dismiss_timer.start(self._auto_dismiss_ms)
         elif mode == OverlayMode.LISTENING:
             # Start animation timer for waveform
             self._animation_timer.start(33)
@@ -281,13 +300,20 @@ class DynamicIslandOverlay(QWidget):
 
         # Apply immediately if visible
         if self.isVisible():
-            self._animate_to_geometry(target_geometry, self.windowOpacity())
+            if self._is_wayland:
+                self._apply_geometry_wayland(target_geometry)
+                self.update()
+            else:
+                self._animate_to_geometry(target_geometry, self._content_opacity)
         else:
             self.setGeometry(target_geometry)
 
     def _calculate_geometry(self, width: int, height: int) -> QRect:
         """
         Calculate geometry based on position setting and monitor.
+
+        Supports positions: top-left, top-center, top-right,
+                           bottom-left, bottom-center, bottom-right
         """
         screens = QApplication.screens()
         if not screens:
@@ -299,11 +325,11 @@ class DynamicIslandOverlay(QWidget):
         else:
             screen = QApplication.primaryScreen()
 
-        screen_geo = screen.geometry()
+        screen_geo = screen.availableGeometry()  # Excludes panels/taskbars
 
-        # Padding
-        padding_y = 0
-        padding_x = 250  # Offset from right to place "left of clock"
+        # Padding from screen edges
+        padding_x = 20
+        padding_y = 8
 
         # Horizontal position
         if "left" in self._position_setting:
@@ -320,6 +346,16 @@ class DynamicIslandOverlay(QWidget):
             y = screen_geo.y() + padding_y
 
         return QRect(x, y, width, height)
+
+    def set_auto_dismiss_ms(self, ms: int) -> None:
+        """
+        Set the auto-dismiss delay for RESULT and COPIED modes.
+
+        Args:
+            ms: Delay in milliseconds (minimum 500ms)
+        """
+        self._auto_dismiss_ms = max(500, ms)
+        logger.debug(f"Auto-dismiss set to {self._auto_dismiss_ms}ms")
 
     def _calculate_centered_geometry(self, width: int, height: int) -> QRect:
         """Deprecated: use _calculate_geometry instead."""
@@ -349,10 +385,10 @@ class DynamicIslandOverlay(QWidget):
         self._geometry_animation.setEndValue(target_geometry)
         self._geometry_animation.setEasingCurve(easing)
 
-        # Opacity animation
-        self._opacity_animation = QPropertyAnimation(self, b"windowOpacity")
+        # Opacity animation (paint-based, Wayland-safe)
+        self._opacity_animation = QPropertyAnimation(self, b"contentOpacity")
         self._opacity_animation.setDuration(duration)
-        self._opacity_animation.setStartValue(self.windowOpacity())
+        self._opacity_animation.setStartValue(self._content_opacity)
         self._opacity_animation.setEndValue(target_opacity)
         self._opacity_animation.setEasingCurve(easing)
 
@@ -369,6 +405,54 @@ class DynamicIslandOverlay(QWidget):
         elif self._mode == OverlayMode.HIDDEN:
             # Hide after animation completes
             self._animation_group.finished.connect(self.hide)
+
+    def _animate_opacity_only(self, target_opacity: float, duration: int = 300, on_done=None) -> None:
+        """
+        Animate only opacity (used on Wayland where geometry animation
+        causes the compositor to auto-hide Tool windows).
+        """
+        if self._animation_group and self._animation_group.state() == QParallelAnimationGroup.Running:
+            self._animation_group.stop()
+
+        self._opacity_animation = QPropertyAnimation(self, b"contentOpacity")
+        self._opacity_animation.setDuration(duration)
+        self._opacity_animation.setStartValue(self._content_opacity)
+        self._opacity_animation.setEndValue(target_opacity)
+        self._opacity_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+        if on_done:
+            self._opacity_animation.finished.connect(on_done)
+
+        self._opacity_animation.start()
+
+    def _apply_geometry_wayland(self, target_geometry: QRect) -> None:
+        """
+        Best-effort positioning on Wayland (GNOME Mutter).
+        Re-apply geometry after show to improve compositor compliance.
+        """
+        self.setGeometry(target_geometry)
+        handle = self.windowHandle()
+        if handle:
+            handle.setPosition(target_geometry.topLeft())
+        # Re-apply after the surface is mapped
+        QTimer.singleShot(0, lambda tg=QRect(target_geometry): self._apply_geometry_wayland_once(tg))
+        QTimer.singleShot(50, lambda tg=QRect(target_geometry): self._apply_geometry_wayland_once(tg))
+
+    def _apply_geometry_wayland_once(self, target_geometry: QRect) -> None:
+        """Single-shot geometry set used by _apply_geometry_wayland."""
+        self.setGeometry(target_geometry)
+        handle = self.windowHandle()
+        if handle:
+            handle.setPosition(target_geometry.topLeft())
+
+    def _get_content_opacity(self) -> float:
+        return self._content_opacity
+
+    def _set_content_opacity(self, value: float) -> None:
+        self._content_opacity = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    contentOpacity = Property(float, _get_content_opacity, _set_content_opacity)
 
     def update_waveform(self, levels: List[float]) -> None:
         """
@@ -475,8 +559,11 @@ class DynamicIslandOverlay(QWidget):
         height = self.height()
 
         # Don't paint if hidden
-        if width == 0 or height == 0:
+        if width == 0 or height == 0 or self._content_opacity <= 0.0:
             return
+
+        # Apply overall fade without relying on window opacity (Wayland-safe)
+        painter.setOpacity(self._content_opacity)
 
         # Draw rounded background
         self._paint_background(painter, width, height)

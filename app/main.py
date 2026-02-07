@@ -28,6 +28,7 @@ from app.core.audio_capture import AudioRecorder
 from app.core.hotkey_manager import HotkeyManager
 from app.core.state_machine import StateMachine, ApplicationState
 from app.core.transcription_queue_manager import TranscriptionQueueManager
+from app.core.ipc_server import IPCServer
 
 # UI components
 from app.ui.overlay import DynamicIslandOverlay, OverlayMode
@@ -201,6 +202,10 @@ class WhisperFreeApp(QObject):
         logger.info("Initializing background workers...")
         self._init_workers()
 
+        # IPC server for Wayland hotkey support (whisper --toggle)
+        self.ipc_server = IPCServer()
+        self.ipc_server.command_received.connect(self._on_ipc_command)
+
         # Waveform update timer (30 FPS)
         self.waveform_timer = QTimer()
         self.waveform_timer.timeout.connect(self._update_waveform)
@@ -338,6 +343,9 @@ class WhisperFreeApp(QObject):
         monitor = self.config.get('overlay.monitor', 0)
         self.overlay.set_position(position, monitor)
 
+        auto_dismiss_ms = self.config.get('overlay.auto_dismiss_ms', 1000)
+        self.overlay.set_auto_dismiss_ms(auto_dismiss_ms)
+
         # Main window
         self.main_window = MainWindow(self.db, self.config, self.whisper, self.queue_manager)
 
@@ -406,6 +414,14 @@ class WhisperFreeApp(QObject):
     def on_ptt_button_clicked(self):
         """Handle PTT button click (toggle start/stop)."""
         self.on_hotkey_pressed()
+
+    def _on_ipc_command(self, command: str):
+        """Handle IPC command from external process (e.g., whisper --toggle)."""
+        logger.info(f"IPC command: {command}")
+        if command == "toggle":
+            self.on_hotkey_pressed()
+        else:
+            logger.warning(f"Unknown IPC command: {command}")
 
     def start_recording(self):
         """Begin audio capture (non-blocking)"""
@@ -588,8 +604,9 @@ class WhisperFreeApp(QObject):
                 logger.error("Failed to transition to COMPLETED state")
                 return
 
-            # Auto-reset to idle after 2.5 seconds (matches overlay auto-dismiss)
-            QTimer.singleShot(2500, self._reset_to_idle)
+            # Auto-reset to idle after overlay auto-dismiss completes
+            auto_dismiss_ms = self.config.get('overlay.auto_dismiss_ms', 1000)
+            QTimer.singleShot(auto_dismiss_ms + 200, self._reset_to_idle)
 
         except Exception as e:
             logger.error(f"Failed to handle transcription result: {e}")
@@ -690,6 +707,9 @@ class WhisperFreeApp(QObject):
         monitor = self.config.get('overlay.monitor', 0)
         self.overlay.set_position(position, monitor)
 
+        auto_dismiss_ms = self.config.get('overlay.auto_dismiss_ms', 1000)
+        self.overlay.set_auto_dismiss_ms(auto_dismiss_ms)
+
         # Note: Model changes are handled separately via model_changed signal
 
         logger.info("Settings reloaded successfully")
@@ -783,6 +803,12 @@ class WhisperFreeApp(QObject):
         """Start the application"""
         logger.info("Starting Whisper-Free...")
 
+        # Start IPC server (Wayland hotkey support)
+        if self.ipc_server.start():
+            logger.info("IPC server started (use 'whisper --toggle' for Wayland hotkey)")
+        else:
+            logger.warning("IPC server failed to start")
+
         # Start hotkey listener thread
         self.hotkey_thread.started.connect(self.hotkey.start)
         self.hotkey_thread.start()
@@ -809,6 +835,10 @@ class WhisperFreeApp(QObject):
     def cleanup(self):
         """Cleanup resources before exit"""
         logger.info("Cleaning up...")
+
+        # Stop IPC server
+        if hasattr(self, 'ipc_server'):
+            self.ipc_server.stop()
 
         # Stop hotkey listener
         if self.hotkey_thread.isRunning():
