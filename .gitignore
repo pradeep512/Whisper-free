@@ -1,6 +1,9 @@
 # User requested to exclude docs
 docs/
 
+# Archive (cleanroom storage, not tracked)
+archive/
+
 # Python
 __pycache__/
 *.pyc
@@ -40,3 +43,8 @@ Thumbs.db
 
 # Dependencies (Use requirements.txt instead)
 whisper/
+
+# Archived vendor / local envs
+archive/third_party/whisper/
+archive/venv/
+archive/cache/

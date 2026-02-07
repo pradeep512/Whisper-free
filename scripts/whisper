@@ -4,11 +4,24 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-VENV_PY="$REPO_ROOT/venv/bin/python"
+VENV_PY=""
 
-if [ ! -x "$VENV_PY" ]; then
-  echo "Virtualenv not found: $VENV_PY" >&2
-  echo "Create it with: python -m venv venv" >&2
+# Allow explicit override
+if [ -n "${WHISPER_PYTHON:-}" ] && [ -x "${WHISPER_PYTHON:-}" ]; then
+  VENV_PY="$WHISPER_PYTHON"
+else
+  # Prefer venv in repo root, then archived venv if repo was cleaned
+  if [ -x "$REPO_ROOT/venv/bin/python" ]; then
+    VENV_PY="$REPO_ROOT/venv/bin/python"
+  elif [ -x "$REPO_ROOT/archive/venv/bin/python" ]; then
+    VENV_PY="$REPO_ROOT/archive/venv/bin/python"
+  fi
+fi
+
+if [ -z "$VENV_PY" ]; then
+  echo "Virtualenv not found." >&2
+  echo "Create it with: python -m venv venv && source venv/bin/activate && pip install -r requirements.txt" >&2
+  echo "Or set WHISPER_PYTHON to a Python executable with the dependencies installed." >&2
   exit 1
 fi
 
