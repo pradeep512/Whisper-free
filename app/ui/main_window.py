@@ -10,7 +10,7 @@ Provides the main UI for Whisper-Free with:
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QListWidget, QListWidgetItem, QLabel, QStatusBar
+    QListWidget, QListWidgetItem, QLabel, QStatusBar, QPushButton
 )
 from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QIcon, QFont
@@ -19,6 +19,8 @@ import logging
 from app.ui.history_panel import HistoryPanel
 from app.ui.settings_panel import SettingsPanel
 from app.ui.file_transcribe_panel import FileTranscribePanel
+from app.ui.batch_transcribe_panel import BatchTranscribePanel
+from app.core.state_machine import ApplicationState
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +33,9 @@ class MainWindow(QMainWindow):
 
     # Signals
     settings_changed = Signal()  # Emitted when user saves settings
+    ptt_toggle_requested = Signal()  # Emitted when user clicks PTT button
 
-    def __init__(self, db_manager, config_manager, whisper_engine=None):
+    def __init__(self, db_manager, config_manager, whisper_engine=None, queue_manager=None):
         """
         Initialize main window
 
@@ -40,11 +43,13 @@ class MainWindow(QMainWindow):
             db_manager: DatabaseManager instance
             config_manager: ConfigManager instance
             whisper_engine: WhisperEngine instance (optional, for file transcription)
+            queue_manager: TranscriptionQueueManager instance (optional, for job management)
         """
         super().__init__()
         self.db = db_manager
         self.config = config_manager
         self.whisper_engine = whisper_engine
+        self.queue_manager = queue_manager
 
         # Store panels
         self.history_panel = None
@@ -56,6 +61,7 @@ class MainWindow(QMainWindow):
         self.status_label = None
         self.model_label = None
         self.vram_label = None
+        self.ptt_button = None
 
         self.setWindowTitle("Whisper-Free")
         self.setWindowTitle("Whisper-Free")
@@ -126,7 +132,7 @@ class MainWindow(QMainWindow):
         self.sidebar.clear()
 
         # Top items
-        for text in ["History", "File Transcribe", "Settings"]:
+        for text in ["History", "File Transcribe", "Batch Files", "Settings"]:
             item = QListWidgetItem(text)
             item.setSizeHint(QSize(140, 45))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -143,12 +149,13 @@ class MainWindow(QMainWindow):
         # Create panels
         self.history_panel = HistoryPanel(self.db)
 
-        # File transcribe panel (only if whisper_engine is available)
-        if self.whisper_engine:
+        # File transcribe panel (only if whisper_engine and queue_manager are available)
+        if self.whisper_engine and self.queue_manager:
             self.file_transcribe_panel = FileTranscribePanel(
                 self.config,
                 self.whisper_engine,
-                self.db
+                self.db,
+                self.queue_manager
             )
         else:
             # Create placeholder if engine not available
@@ -157,14 +164,29 @@ class MainWindow(QMainWindow):
                 "File transcription requires WhisperEngine.\nPlease restart the application."
             )
 
+        # Batch transcribe panel (only if queue_manager is available)
+        if self.queue_manager:
+            self.batch_transcribe_panel = BatchTranscribePanel(
+                self.queue_manager,
+                self.config,
+                self.db
+            )
+        else:
+            # Create placeholder if queue manager not available
+            self.batch_transcribe_panel = self._create_placeholder_panel(
+                "Batch Files",
+                "Batch transcription requires TranscriptionQueueManager.\nPlease restart the application."
+            )
+
         self.settings_panel = SettingsPanel(self.config)
         self.about_panel = self._create_about_panel()
 
         # Add panels to stack (order matches sidebar)
-        self.stack.addWidget(self.history_panel)          # Index 0
-        self.stack.addWidget(self.file_transcribe_panel)  # Index 1
-        self.stack.addWidget(self.settings_panel)         # Index 2
-        self.stack.addWidget(self.about_panel)            # Index 3
+        self.stack.addWidget(self.history_panel)           # Index 0
+        self.stack.addWidget(self.file_transcribe_panel)   # Index 1
+        self.stack.addWidget(self.batch_transcribe_panel)  # Index 2
+        self.stack.addWidget(self.settings_panel)          # Index 3
+        self.stack.addWidget(self.about_panel)             # Index 4
 
         # Connect settings panel signals
         self.settings_panel.settings_saved.connect(self.settings_changed.emit)
@@ -249,6 +271,33 @@ class MainWindow(QMainWindow):
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
 
+        # PTT toggle button (Wayland-safe)
+        self.ptt_button = QPushButton("Start Recording")
+        self.ptt_button.setFixedHeight(28)
+        self.ptt_button.clicked.connect(self.ptt_toggle_requested.emit)
+        self.ptt_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1f3b2c;
+                border: 1px solid #2d5a3f;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: bold;
+                color: #e6ffe6;
+            }
+            QPushButton:hover {
+                background-color: #254a36;
+            }
+            QPushButton:pressed {
+                background-color: #1b3326;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a2a;
+                border: 1px solid #3a3a3a;
+                color: #777777;
+            }
+        """)
+
         # Status label
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #00ff00; font-weight: bold;")
@@ -268,6 +317,7 @@ class MainWindow(QMainWindow):
         # Spacer to push status to left and others to right
         # Default behavior: addWidget puts on left, addPermanent on right.
         
+        status_bar.addWidget(self.ptt_button)
         status_bar.addWidget(self.status_label)
         
         # Create container for right side stats
@@ -280,6 +330,27 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.vram_label)
         
         status_bar.addPermanentWidget(stats_widget)
+
+    def update_ptt_button(self, state: ApplicationState) -> None:
+        """Update PTT button label and enabled state based on app state."""
+        if self.ptt_button is None:
+            return
+
+        if state == ApplicationState.IDLE:
+            self.ptt_button.setText("Start Recording")
+            self.ptt_button.setEnabled(True)
+        elif state == ApplicationState.RECORDING:
+            self.ptt_button.setText("Stop Recording")
+            self.ptt_button.setEnabled(True)
+        elif state == ApplicationState.PROCESSING:
+            self.ptt_button.setText("Processing...")
+            self.ptt_button.setEnabled(False)
+        elif state == ApplicationState.COMPLETED:
+            self.ptt_button.setText("Start Recording")
+            self.ptt_button.setEnabled(True)
+        elif state == ApplicationState.ERROR:
+            self.ptt_button.setText("Start Recording")
+            self.ptt_button.setEnabled(True)
 
     def _on_sidebar_changed(self, row: int):
         """Handle sidebar selection change"""
