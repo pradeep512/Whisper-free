@@ -47,34 +47,61 @@ def init_macos(app) -> None:
     Args:
         app: The WhisperFreeApp instance.
     """
-    _set_accessory_activation_policy()
+    # Honor the user's "Show in Dock" preference (default: False = agent app).
+    show_in_dock = False
+    try:
+        show_in_dock = bool(app.config.get('macos.show_in_dock', False))
+    except Exception:
+        pass
+    set_dock_visible(show_in_dock)
+
     _install_tray_icon(app)
 
 
-def _set_accessory_activation_policy() -> None:
-    """Hide the Dock icon at runtime (parity with LSUIElement=true in the bundled .app).
+def set_dock_visible(visible: bool) -> bool:
+    """Show or hide the Dock icon by switching NSApp's activation policy.
 
-    The bundled .app uses Info.plist's LSUIElement=true to start as a
-    menu-bar agent. But when running from source, the Python interpreter is
-    a regular app and shows a Dock icon for "Python" / "python3". This call
-    switches the activation policy to Accessory so it disappears live.
+    visible=True  -> NSApplicationActivationPolicyRegular  (Dock icon shown)
+    visible=False -> NSApplicationActivationPolicyAccessory (Dock icon hidden,
+                     matches LSUIElement=true in the bundled .app)
 
-    Falls back silently if pyobjc is not installed (pre-Phase-2-deps state).
+    Returns:
+        True on success, False if pyobjc is unavailable or the call failed.
     """
     try:
-        from AppKit import NSApp, NSApplicationActivationPolicyAccessory
-        if NSApp is not None:
-            NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-            logger.info("NSApp activation policy set to Accessory (Dock icon hidden)")
-        else:
-            logger.warning("NSApp is None; cannot set activation policy")
+        from AppKit import (
+            NSApp,
+            NSApplicationActivationPolicyAccessory,
+            NSApplicationActivationPolicyRegular,
+        )
     except ImportError:
         logger.warning(
-            "pyobjc not installed; Dock icon will remain visible during dev runs. "
+            "pyobjc not installed; cannot toggle Dock visibility. "
             "Install with: pip install -r requirements-macos.txt"
         )
+        return False
+
+    try:
+        if NSApp is None:
+            logger.warning("NSApp is None; cannot set activation policy")
+            return False
+        policy = (
+            NSApplicationActivationPolicyRegular if visible
+            else NSApplicationActivationPolicyAccessory
+        )
+        NSApp.setActivationPolicy_(policy)
+        logger.info(
+            f"NSApp activation policy set to "
+            f"{'Regular (Dock visible)' if visible else 'Accessory (Dock hidden)'}"
+        )
+        return True
     except Exception as e:
-        logger.warning(f"Could not set activation policy: {e}")
+        logger.warning(f"setActivationPolicy failed: {e}")
+        return False
+
+
+# (Previous _set_accessory_activation_policy is now superseded by the
+# public set_dock_visible(visible) helper below.)
 
 
 def _install_tray_icon(app) -> None:

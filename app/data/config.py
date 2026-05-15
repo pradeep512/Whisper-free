@@ -76,6 +76,11 @@ class ConfigManager:
                 'tsv': False,
             },
         },
+        # macOS-specific preferences. Read only on darwin; harmless on Linux.
+        'macos': {
+            'show_in_dock': False,    # False = menu-bar agent (default)
+            'open_at_login': False,
+        },
     }
 
     # Valid values for validation

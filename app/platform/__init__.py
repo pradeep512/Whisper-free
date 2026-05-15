@@ -12,14 +12,35 @@ import sys
 if sys.platform == 'darwin':
     from app.platform.macos import paths
     from app.platform.macos import hotkey_perms
+    from app.platform.macos import autolaunch
 elif sys.platform.startswith('linux'):
     from app.platform.linux import paths
     from app.platform.linux import hotkey_perms
+    from app.platform.linux import autolaunch
 else:
     raise RuntimeError(
         f"Unsupported platform: {sys.platform}. "
         "Whisper-Free supports Linux and macOS (Apple Silicon) only."
     )
+
+
+def set_dock_visible(visible: bool) -> bool:
+    """Toggle the macOS Dock icon. No-op on non-darwin platforms (returns True).
+
+    Args:
+        visible: True to show the Dock icon (Regular policy),
+                 False to hide it (Accessory policy, default for agent apps).
+
+    Returns:
+        True on success or when not applicable; False if the call failed.
+    """
+    if sys.platform == 'darwin':
+        try:
+            from app.platform.macos.init import set_dock_visible as _impl
+            return _impl(visible)
+        except ImportError:
+            return False
+    return True
 
 
 def apply_early_config(config) -> None:
@@ -63,4 +84,7 @@ def platform_init(app) -> None:
     # Linux currently has nothing extra to do at init time.
 
 
-__all__ = ['paths', 'hotkey_perms', 'apply_early_config', 'platform_init']
+__all__ = [
+    'paths', 'hotkey_perms', 'autolaunch',
+    'apply_early_config', 'platform_init', 'set_dock_visible',
+]

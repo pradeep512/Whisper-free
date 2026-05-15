@@ -108,8 +108,10 @@ class SettingsPanel(QWidget):
         self.setting_groups.append(self._create_audio_group())
         self.setting_groups.append(self._create_hotkey_group())
         self.setting_groups.append(self._create_overlay_group())
+        if sys.platform == 'darwin':
+            self.setting_groups.append(self._create_macos_group())
         self.setting_groups.append(self._create_advanced_group())
-        
+
         # Initial layout
         self._reflow_grid()
 
@@ -216,11 +218,13 @@ class SettingsPanel(QWidget):
         self.vram_estimates_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
         form.addRow("", self.vram_estimates_label)
 
-        # Actual VRAM usage label (updated externally)
+        # Actual VRAM usage label (updated externally). On macOS, MLX uses
+        # unified memory; the label text reflects that.
         vram_label = QLabel("N/A")
         vram_label.setStyleSheet("color: #888888;")
         self.widgets['vram_label'] = vram_label
-        form.addRow("Actual VRAM:", vram_label)
+        vram_row_label = "Unified memory:" if sys.platform == 'darwin' else "Actual VRAM:"
+        form.addRow(vram_row_label, vram_label)
 
         return group
 
@@ -372,6 +376,80 @@ class SettingsPanel(QWidget):
 
         return group
 
+    def _create_macos_group(self) -> QGroupBox:
+        """Create the macOS-only settings group.
+
+        Houses Mac-native polish toggles. Both toggles apply *immediately*
+        (not on Save) since their effects are immediately visible.
+        """
+        group = QGroupBox("macOS")
+        group.setStyleSheet(self._group_style())
+
+        form = QFormLayout(group)
+        form.setSpacing(12)
+        form.setContentsMargins(16, 24, 16, 16)
+
+        # Open at Login — uses SMAppService (macOS 13+).
+        open_at_login_cb = QCheckBox("Open Whisper-Free at login")
+        open_at_login_cb.setStyleSheet("color: #cccccc;")
+        open_at_login_cb.setToolTip(
+            "Start Whisper-Free automatically when you log in. "
+            "May not work when running from source — only the bundled "
+            ".app installed to /Applications can register reliably."
+        )
+        open_at_login_cb.stateChanged.connect(self._on_open_at_login_toggled)
+        self.widgets['macos.open_at_login'] = open_at_login_cb
+        form.addRow("", open_at_login_cb)
+
+        # Show in Dock — toggles NSApp activation policy live.
+        show_in_dock_cb = QCheckBox("Show Whisper-Free in the Dock")
+        show_in_dock_cb.setStyleSheet("color: #cccccc;")
+        show_in_dock_cb.setToolTip(
+            "By default Whisper-Free is a menu-bar agent (no Dock icon). "
+            "Enable this to also show it in the Dock. Takes effect immediately."
+        )
+        show_in_dock_cb.stateChanged.connect(self._on_show_in_dock_toggled)
+        self.widgets['macos.show_in_dock'] = show_in_dock_cb
+        form.addRow("", show_in_dock_cb)
+
+        return group
+
+    def _on_open_at_login_toggled(self, state) -> None:
+        """Apply + persist Open-at-Login immediately."""
+        from PySide6.QtCore import Qt as _Qt
+        enabled = (state == _Qt.CheckState.Checked.value) or (state == _Qt.Checked)
+        try:
+            from app.platform import autolaunch
+            ok = autolaunch.set_open_at_login(enabled)
+            if not ok:
+                logger.warning(
+                    f"Open at Login {'enable' if enabled else 'disable'} failed. "
+                    "When running from source this is expected; the bundled "
+                    ".app installed to /Applications will work."
+                )
+        except Exception as e:
+            logger.error(f"Open at Login toggle failed: {e}")
+        try:
+            self.config.set('macos.open_at_login', enabled)
+            self.config.save()
+        except Exception as e:
+            logger.error(f"Could not persist macos.open_at_login: {e}")
+
+    def _on_show_in_dock_toggled(self, state) -> None:
+        """Apply + persist Show-in-Dock immediately."""
+        from PySide6.QtCore import Qt as _Qt
+        visible = (state == _Qt.CheckState.Checked.value) or (state == _Qt.Checked)
+        try:
+            from app.platform import set_dock_visible
+            set_dock_visible(visible)
+        except Exception as e:
+            logger.error(f"Show in Dock toggle failed: {e}")
+        try:
+            self.config.set('macos.show_in_dock', visible)
+            self.config.save()
+        except Exception as e:
+            logger.error(f"Could not persist macos.show_in_dock: {e}")
+
     def _create_advanced_group(self) -> QGroupBox:
         """Create Advanced settings group"""
         group = QGroupBox("Advanced")
@@ -381,9 +459,16 @@ class SettingsPanel(QWidget):
         form.setSpacing(12)
         form.setContentsMargins(16, 24, 16, 16)
 
-        # fp16 checkbox
+        # fp16 checkbox. On macOS the MLX backend manages precision internally,
+        # so this setting is irrelevant — we keep the widget for cross-platform
+        # config parity but disable it with an explanatory tooltip.
         fp16_cb = QCheckBox("fp16 (GPU optimization)")
         fp16_cb.setStyleSheet("color: #cccccc;")
+        if sys.platform == 'darwin':
+            fp16_cb.setEnabled(False)
+            fp16_cb.setToolTip(
+                "Not applicable on macOS — MLX manages precision automatically."
+            )
         self.widgets['whisper.fp16'] = fp16_cb
         form.addRow("", fp16_cb)
 
@@ -475,6 +560,18 @@ class SettingsPanel(QWidget):
             self.widgets['overlay.auto_dismiss_ms'].setValue(
                 self.config.get('overlay.auto_dismiss_ms', 2500)
             )
+
+            # macOS (only created on darwin)
+            if sys.platform == 'darwin':
+                # Block signals while we sync from config so the stateChanged
+                # handlers don't re-fire side effects (autolaunch register,
+                # setActivationPolicy) just from loading saved state.
+                for key in ('macos.open_at_login', 'macos.show_in_dock'):
+                    cb = self.widgets.get(key)
+                    if cb is not None:
+                        cb.blockSignals(True)
+                        cb.setChecked(self.config.get(key, False))
+                        cb.blockSignals(False)
 
             # Advanced
             self.widgets['whisper.fp16'].setChecked(
