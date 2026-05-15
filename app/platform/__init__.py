@@ -20,12 +20,31 @@ else:
     )
 
 
+def apply_early_config(config) -> None:
+    """Apply per-platform config tweaks BEFORE core components are built.
+
+    Called from WhisperFreeApp.__init__ right after ConfigManager loads,
+    BEFORE HotkeyManager and other components read the config. Must be
+    cheap and dependency-free.
+
+    Args:
+        config: The ConfigManager instance.
+    """
+    if sys.platform == 'darwin':
+        try:
+            from app.platform.macos import init as macos_init
+            macos_init.apply_early_macos_config(config)
+        except ImportError:
+            # macOS-specific deps not installed; degrade silently.
+            pass
+
+
 def platform_init(app) -> None:
     """
-    Apply per-platform initialization to the WhisperFreeApp instance.
+    Apply per-platform runtime initialization to the WhisperFreeApp instance.
 
-    Called once during WhisperFreeApp.__init__ after components exist but
-    before the event loop starts. Used for things like installing the
+    Called once at the END of WhisperFreeApp.__init__, after components exist
+    but before the event loop starts. Used for things like installing the
     macOS tray icon, setting NSApp activation policy, applying overlay
     collection behavior.
 
@@ -38,9 +57,8 @@ def platform_init(app) -> None:
             macos_init.init_macos(app)
         except ImportError:
             # macOS-specific deps not installed; degrade gracefully.
-            # Pre-Phase 3, this path is the norm.
             pass
     # Linux currently has nothing extra to do at init time.
 
 
-__all__ = ['paths', 'platform_init']
+__all__ = ['paths', 'apply_early_config', 'platform_init']

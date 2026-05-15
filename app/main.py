@@ -40,7 +40,7 @@ from app.data.config import ConfigManager
 
 # Platform-specific paths and initialization hooks
 from app.platform import paths as platform_paths
-from app.platform import platform_init
+from app.platform import apply_early_config, platform_init
 
 
 # Setup logging
@@ -195,6 +195,11 @@ class WhisperFreeApp(QObject):
         logger.info("Initializing configuration and database...")
         self.config = ConfigManager()
         self.db = DatabaseManager()
+
+        # Apply per-platform config tweaks (e.g. upgrade Linux hotkey
+        # defaults to Mac-appropriate ones) BEFORE core components read
+        # the config. This is platform_init's "early" sibling.
+        apply_early_config(self.config)
 
         # Initialize core components
         logger.info("Initializing core components...")
@@ -841,8 +846,14 @@ class WhisperFreeApp(QObject):
         logger.info("Hotkey listener started")
 
         # Show main window
-        self.main_window.show()
-        logger.info("Main window shown")
+        # On macOS we run as a menu-bar agent (LSUIElement=true); the tray
+        # icon installed in init_macos() is the primary entry point. The user
+        # opens the main window on demand via the tray's "Open Window…" item.
+        if sys.platform == 'darwin':
+            logger.info("macOS: main window hidden; menu bar tray is the entry point")
+        else:
+            self.main_window.show()
+            logger.info("Main window shown")
 
         # Show overlay in hidden mode initially (will appear on hotkey)
         if self.config.get('overlay.enabled', True):

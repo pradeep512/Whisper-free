@@ -1,0 +1,160 @@
+"""
+macOS menu bar tray icon for Whisper-Free.
+
+On macOS, QSystemTrayIcon maps to NSStatusItem in the system menu bar.
+Left-click toggles recording (primary action). Right-click / Control-click
+shows the context menu (Toggle / Open Window / Quit).
+"""
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
+from PySide6.QtGui import (
+    QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap,
+)
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+logger = logging.getLogger(__name__)
+
+
+# Size for the synthesized fallback menu-bar icon (rendered at @2x).
+_FALLBACK_ICON_SIZE = 36
+
+
+class TrayController(QObject):
+    """Menu bar icon for macOS.
+
+    Signals:
+        toggle_requested:      Emitted on left-click (or context "Toggle Recording").
+        open_window_requested: Emitted on context "Open Window…".
+        quit_requested:        Emitted on context "Quit Whisper-Free".
+    """
+
+    toggle_requested = Signal()
+    open_window_requested = Signal()
+    quit_requested = Signal()
+
+    def __init__(self, icon_path: Optional[Path] = None, parent: Optional[QObject] = None):
+        super().__init__(parent)
+
+        icon = self._build_icon(icon_path)
+
+        self._tray = QSystemTrayIcon(icon, self)
+        self._tray.setToolTip("Whisper-Free")
+
+        # Context menu (right-click). Keep references so Qt doesn't GC them.
+        self._menu = QMenu()
+        self._action_toggle = QAction("Toggle Recording", self._menu)
+        self._action_toggle.triggered.connect(self.toggle_requested.emit)
+        self._menu.addAction(self._action_toggle)
+
+        self._menu.addSeparator()
+
+        self._action_open = QAction("Open Window…", self._menu)
+        self._action_open.triggered.connect(self.open_window_requested.emit)
+        self._menu.addAction(self._action_open)
+
+        self._menu.addSeparator()
+
+        self._action_quit = QAction("Quit Whisper-Free", self._menu)
+        self._action_quit.triggered.connect(self.quit_requested.emit)
+        self._menu.addAction(self._action_quit)
+
+        self._tray.setContextMenu(self._menu)
+        self._tray.activated.connect(self._on_activated)
+
+        logger.info("TrayController initialized (macOS menu bar)")
+
+    # ---- public API ----
+
+    def show(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning(
+                "System tray not available; menu bar icon cannot be shown"
+            )
+            return
+        self._tray.show()
+        logger.info("Menu bar icon shown")
+
+    def hide(self) -> None:
+        self._tray.hide()
+
+    def set_recording_state(self, is_recording: bool) -> None:
+        """Reflect recording state in the icon and menu label.
+
+        For now, just updates the menu label and tooltip. A future enhancement
+        can swap to a "recording" icon variant.
+        """
+        if is_recording:
+            self._action_toggle.setText("Stop Recording")
+            self._tray.setToolTip("Whisper-Free — Recording")
+        else:
+            self._action_toggle.setText("Toggle Recording")
+            self._tray.setToolTip("Whisper-Free")
+
+    def update_last_result(self, text: str) -> None:
+        """Reserved for future enhancement (show last transcript in the menu)."""
+        # No-op for v1; a future popover widget will surface this.
+
+    # ---- internals ----
+
+    def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        # Left-click on macOS is Trigger; right-click opens the contextMenu
+        # automatically and emits Context.
+        if reason == QSystemTrayIcon.Trigger:
+            self.toggle_requested.emit()
+
+    def _build_icon(self, icon_path: Optional[Path]) -> QIcon:
+        """Load the menu-bar icon, falling back to a Qt-drawn placeholder.
+
+        Mac menu bar icons should be **template images** (monochrome with
+        alpha, system-tinted). If a proper template asset exists at
+        `icon_path`, use it. Otherwise, draw a simple "W" placeholder so the
+        app still has a recognizable menu bar slot during development.
+        Phase 9 polish: replace the placeholder with a designed mic glyph
+        and ship `assets/menu-bar-icon.png` (16x16 @1x, 32x32 @2x).
+        """
+        if icon_path is not None and icon_path.exists():
+            icon = QIcon(str(icon_path))
+            # If the asset is authored as a template (monochrome+alpha), set
+            # isMask so macOS tints it correctly in light/dark mode.
+            icon.setIsMask(True)
+            logger.debug(f"Loaded menu bar icon from {icon_path}")
+            return icon
+
+        logger.info(
+            "No menu-bar icon asset found; using Qt-drawn placeholder. "
+            "Provide assets/menu-bar-icon.png for proper rendering."
+        )
+        return self._draw_fallback_icon()
+
+    @staticmethod
+    def _draw_fallback_icon() -> QIcon:
+        """Draw a 36x36 white 'W' on a transparent background.
+
+        Designed as a template image: white-with-alpha so macOS' dark/light
+        menu bar tints it appropriately when setIsMask(True).
+        """
+        pixmap = QPixmap(_FALLBACK_ICON_SIZE, _FALLBACK_ICON_SIZE)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(QColor(255, 255, 255, 255), 2))
+
+            font = QFont()
+            font.setBold(True)
+            font.setPixelSize(int(_FALLBACK_ICON_SIZE * 0.7))
+            painter.setFont(font)
+
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
+        finally:
+            painter.end()
+
+        icon = QIcon(pixmap)
+        icon.setIsMask(True)
+        return icon
