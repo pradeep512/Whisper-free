@@ -38,6 +38,10 @@ from app.ui.main_window import MainWindow
 from app.data.database import DatabaseManager
 from app.data.config import ConfigManager
 
+# Platform-specific paths and initialization hooks
+from app.platform import paths as platform_paths
+from app.platform import platform_init
+
 
 # Setup logging
 logging.basicConfig(
@@ -181,14 +185,16 @@ class WhisperFreeApp(QObject):
         self._exit_requested = False
         self.app.aboutToQuit.connect(self.cleanup)
 
-        # Configuration directory
-        self.config_dir = Path.home() / ".config" / "whisper-free"
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        # Configuration directory (platform-aware: ~/.config/whisper-free on
+        # Linux, ~/Library/Application Support/Whisper-Free on macOS)
+        self.config_dir = platform_paths.config_dir()
+        logger.info(f"Config directory: {self.config_dir}")
 
-        # Initialize data layer
+        # Initialize data layer (each manager reads its default path from
+        # app.platform.paths when constructed with no path argument)
         logger.info("Initializing configuration and database...")
-        self.config = ConfigManager(str(self.config_dir / "config.yaml"))
-        self.db = DatabaseManager(str(self.config_dir / "history.db"))
+        self.config = ConfigManager()
+        self.db = DatabaseManager()
 
         # Initialize core components
         logger.info("Initializing core components...")
@@ -217,6 +223,11 @@ class WhisperFreeApp(QObject):
         # State tracking
         self.last_transcript = ""
         self.last_audio_data = None
+
+        # Apply platform-specific initialization (no-op on Linux; on macOS,
+        # later phases register the menu bar tray icon, set NSApp activation
+        # policy, and apply overlay collection behavior here)
+        platform_init(self)
 
         logger.info("Whisper-Free initialized successfully")
 

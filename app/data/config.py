@@ -82,16 +82,21 @@ class ConfigManager:
     VALID_MODELS = ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
     VALID_POSITIONS = ['top-center', 'top-left', 'top-right', 'bottom-center', 'bottom-left', 'bottom-right']
 
-    def __init__(self, config_path: str = "~/.config/whisper-free/config.yaml"):
+    def __init__(self, config_path: Optional[str] = None):
         """
         Initialize configuration manager.
 
         Args:
-            config_path: Path to YAML config file
+            config_path: Path to YAML config file. If None, uses the
+                         platform-default location from app.platform.paths.
 
         Loads existing config or creates default if missing.
         """
-        self.config_path = Path(config_path).expanduser()
+        if config_path is None:
+            from app.platform import paths
+            self.config_path = paths.config_file()
+        else:
+            self.config_path = Path(config_path).expanduser()
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Initializing config at {self.config_path}")

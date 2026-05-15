@@ -24,16 +24,21 @@ class DatabaseManager:
     Provides search, export, and cleanup functionality.
     """
 
-    def __init__(self, db_path: str = "~/.config/whisper-free/history.db"):
+    def __init__(self, db_path: Optional[str] = None):
         """
         Initialize database manager.
 
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file. If None, uses the
+                     platform-default location from app.platform.paths.
 
         Creates database and tables if they don't exist.
         """
-        self.db_path = Path(db_path).expanduser()
+        if db_path is None:
+            from app.platform import paths
+            self.db_path = paths.database_file()
+        else:
+            self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Initializing database at {self.db_path}")
