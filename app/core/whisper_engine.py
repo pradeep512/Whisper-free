@@ -4,18 +4,33 @@ WhisperEngine: Manages Whisper model lifecycle and transcription.
 This module provides a GPU-optimized interface to OpenAI's Whisper model for
 real-time voice transcription. Designed for RTX 4060 8GB with VRAM efficiency.
 
+It also exposes a `create_whisper_engine()` factory that dispatches to the
+right backend per platform:
+    - Linux (CUDA / CPU): WhisperEngine (this file) — openai-whisper + PyTorch
+    - macOS (Apple Silicon): WhisperEngineMLX — mlx-whisper + Metal
+
+Callers should use the factory rather than constructing WhisperEngine directly.
+
 Author: Whisper-Free Project
 License: MIT
 """
 
-import whisper
-import torch
+import sys
 import numpy as np
 from typing import Optional, Dict, Any
 import logging
 import io
 import pkgutil
 from functools import lru_cache
+
+# whisper / torch are Linux deps; on macOS the engine is whisper_engine_mlx and
+# torch is not installed. Import lazily so this module loads on both platforms.
+try:
+    import whisper  # type: ignore[import-not-found]
+    import torch  # type: ignore[import-not-found]
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -105,6 +120,15 @@ class WhisperEngine:
             RuntimeError: If CUDA requested but not available
             ValueError: If model_name is invalid
         """
+        if not _TORCH_AVAILABLE:
+            raise RuntimeError(
+                "WhisperEngine requires the openai-whisper and torch packages, "
+                "which are not installed in this environment. "
+                "On macOS, use create_whisper_engine() — it will dispatch to "
+                "WhisperEngineMLX automatically. On Linux, install via: "
+                "pip install -r requirements-linux.txt"
+            )
+
         self.model_name = None
         self.device = device
         self.model = None
@@ -334,8 +358,10 @@ class WhisperEngine:
         Get total available VRAM on primary GPU in GB.
 
         Returns:
-            Total VRAM in GB (0.0 if no CUDA)
+            Total VRAM in GB (0.0 if no CUDA or torch not installed)
         """
+        if not _TORCH_AVAILABLE:
+            return 0.0
         if torch.cuda.is_available():
             try:
                 props = torch.cuda.get_device_properties(0)
@@ -384,3 +410,46 @@ class WhisperEngine:
             f"WhisperEngine(model='{self.model_name}', "
             f"device='{self.device}'{vram})"
         )
+
+
+# ============================================================================
+# Platform-aware factory
+# ============================================================================
+
+def create_whisper_engine(model_name: str = "small", device: Optional[str] = None):
+    """Build the right Whisper engine for this platform.
+
+    On macOS (Apple Silicon): returns a WhisperEngineMLX (mlx-whisper backend).
+    On Linux / everywhere else: returns a WhisperEngine (torch backend).
+
+    Args:
+        model_name: Whisper model size. Accepted values depend on the backend
+            but the common subset (tiny/base/small/medium/large-v3-turbo) works
+            on both.
+        device: Backend-specific device hint. Ignored on macOS (always mlx).
+            On Linux: 'cuda' (default) or 'cpu'.
+
+    Returns:
+        An engine instance exposing the WhisperEngine public API:
+            .transcribe(audio, language=None, **kwargs) -> dict
+            .change_model(name) -> None
+            .get_vram_usage() -> float (MB)
+            .get_available_vram() -> float (GB)
+            .cleanup() -> None
+    """
+    if sys.platform == 'darwin':
+        # Apple Silicon — use MLX. Import lazily so Linux installs don't need
+        # mlx in their dependency tree just to load this module.
+        from app.core.whisper_engine_mlx import WhisperEngineMLX
+        logger.info(
+            f"create_whisper_engine: using MLX backend on macOS for '{model_name}'"
+        )
+        return WhisperEngineMLX(model_name=model_name)
+
+    # Linux / other Unix — use the torch backend.
+    resolved_device = device or 'cuda'
+    logger.info(
+        f"create_whisper_engine: using torch backend on {sys.platform} "
+        f"for '{model_name}' on {resolved_device}"
+    )
+    return WhisperEngine(model_name=model_name, device=resolved_device)

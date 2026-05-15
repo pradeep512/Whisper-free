@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from PySide6.QtCore import QThread, QTimer, Signal, QObject, Qt
 
 # Core components
-from app.core.whisper_engine import WhisperEngine
+from app.core.whisper_engine import WhisperEngine, create_whisper_engine
 from app.core.audio_capture import AudioRecorder
 from app.core.hotkey_manager import HotkeyManager
 from app.core.state_machine import StateMachine, ApplicationState
@@ -237,24 +237,34 @@ class WhisperFreeApp(QObject):
         # State machine
         self.state = StateMachine()
 
-        # Whisper engine
+        # Whisper engine — platform-aware factory:
+        # macOS (Apple Silicon) -> WhisperEngineMLX (mlx-whisper)
+        # Linux / other         -> WhisperEngine (torch + openai-whisper)
         try:
             model_name = self.config.get('whisper.model', 'small')
+            # 'device' is only meaningful on Linux. On macOS the factory ignores
+            # it. Keep the default 'cuda' so existing Linux configs keep working.
             device = self.config.get('whisper.device', 'cuda')
-            logger.info(f"Loading Whisper model: {model_name} on {device}")
+            logger.info(f"Loading Whisper model: {model_name} (device hint: {device})")
 
-            self.whisper = WhisperEngine(
+            self.whisper = create_whisper_engine(
                 model_name=model_name,
-                device=device
+                device=device,
             )
-            logger.info(f"Whisper model loaded. VRAM: {self.whisper.get_vram_usage():.1f} MB")
+            logger.info(
+                f"Whisper engine ready: {self.whisper!r} "
+                f"(memory: {self.whisper.get_vram_usage():.1f} MB)"
+            )
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             QMessageBox.critical(
                 None,
                 "Whisper Engine Error",
                 f"Failed to load Whisper model.\n\n{str(e)}\n\n"
-                "Please check that CUDA is available or set device='cpu' in config."
+                "On Linux: check that CUDA is available or set "
+                "whisper.device='cpu' in config.\n"
+                "On macOS: ensure you're on Apple Silicon (M1+) and that "
+                "mlx-whisper is installed."
             )
             sys.exit(1)
 

@@ -1,0 +1,20 @@
+# macOS-only dependencies for Whisper-Free (Apple Silicon, MLX path).
+# Install with: pip install -r requirements-macos.txt
+#
+# Requires:
+#   - Apple Silicon Mac (M1, M2, M3, M4) — Intel not supported.
+#   - macOS 13.5 (Ventura) or newer.
+#   - Python 3.10+ (3.11 recommended).
+
+-r requirements-base.txt
+
+# Whisper backend (mlx-whisper + Apple MLX)
+mlx>=0.20.0
+mlx-whisper>=0.4.0
+huggingface_hub>=0.24.0
+
+# macOS-native APIs (Cocoa, Accessibility, AVFoundation, ServiceManagement)
+pyobjc-framework-Cocoa>=10.0
+pyobjc-framework-ApplicationServices>=10.0
+pyobjc-framework-AVFoundation>=10.0
+pyobjc-framework-ServiceManagement>=10.0
