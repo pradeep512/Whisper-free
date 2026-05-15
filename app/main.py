@@ -190,6 +190,13 @@ class WhisperFreeApp(QObject):
         self.config_dir = platform_paths.config_dir()
         logger.info(f"Config directory: {self.config_dir}")
 
+        # First-launch detection — check BEFORE ConfigManager auto-creates
+        # the config file. Used by run() to decide whether to show the
+        # onboarding wizard.
+        self._is_first_launch = not platform_paths.config_file().exists()
+        if self._is_first_launch:
+            logger.info("First launch detected (no config file present)")
+
         # Initialize data layer (each manager reads its default path from
         # app.platform.paths when constructed with no path argument)
         logger.info("Initializing configuration and database...")
@@ -404,6 +411,12 @@ class WhisperFreeApp(QObject):
 
         # Settings panel → Model change
         self.main_window.settings_panel.model_changed.connect(self.on_model_changed)
+
+        # Settings panel → Re-run onboarding wizard (macOS only; no-op signal
+        # on Linux because the button isn't created there)
+        self.main_window.settings_panel.rerun_setup_requested.connect(
+            self.show_onboarding_wizard
+        )
 
         # History panel → Text copied
         self.main_window.history_panel.text_copied.connect(self.on_text_copied)
@@ -830,9 +843,38 @@ class WhisperFreeApp(QObject):
         if job_id.startswith('ptt_'):
             self.on_transcription_error(error_message)
 
+    def show_onboarding_wizard(self) -> None:
+        """Show the first-launch onboarding wizard (idempotent).
+
+        Public so the Settings panel "Re-run setup…" button can invoke it.
+        On Linux this is a no-op.
+        """
+        try:
+            from app.ui.onboarding_wizard import OnboardingWizard, should_show_on_launch
+        except Exception as e:
+            logger.error(f"Could not import onboarding wizard: {e}")
+            return
+
+        if not should_show_on_launch():
+            logger.debug("Onboarding wizard not applicable on this platform")
+            return
+
+        try:
+            wiz = OnboardingWizard(parent=self.main_window)
+            wiz.exec()
+        except Exception as e:
+            logger.error(f"Onboarding wizard failed: {e}")
+
     def run(self):
         """Start the application"""
         logger.info("Starting Whisper-Free...")
+
+        # First-launch onboarding wizard (macOS only). Runs BEFORE the hotkey
+        # listener starts so the user can grant Accessibility permission
+        # before pynput attempts the global key grab.
+        if sys.platform == 'darwin' and getattr(self, '_is_first_launch', False):
+            logger.info("Showing onboarding wizard (first launch)")
+            self.show_onboarding_wizard()
 
         # Start IPC server (Wayland hotkey support)
         if self.ipc_server.start():

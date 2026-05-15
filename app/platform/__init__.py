@@ -11,8 +11,10 @@ import sys
 
 if sys.platform == 'darwin':
     from app.platform.macos import paths
+    from app.platform.macos import hotkey_perms
 elif sys.platform.startswith('linux'):
     from app.platform.linux import paths
+    from app.platform.linux import hotkey_perms
 else:
     raise RuntimeError(
         f"Unsupported platform: {sys.platform}. "
@@ -61,4 +63,4 @@ def platform_init(app) -> None:
     # Linux currently has nothing extra to do at init time.
 
 
-__all__ = ['paths', 'apply_early_config', 'platform_init']
+__all__ = ['paths', 'hotkey_perms', 'apply_early_config', 'platform_init']

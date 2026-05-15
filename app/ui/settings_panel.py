@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, QEvent
 import logging
+import sys
 
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QColor, QBrush
 from app.core.audio_capture import AudioRecorder
@@ -33,6 +34,7 @@ class SettingsPanel(QWidget):
     # Signals
     settings_saved = Signal()  # Emitted when settings are saved
     model_changed = Signal(str)  # Emitted when Whisper model is changed
+    rerun_setup_requested = Signal()  # Emitted on darwin when user clicks "Re-run setup…"
 
     def __init__(self, config_manager):
         """
@@ -125,6 +127,15 @@ class SettingsPanel(QWidget):
         reset_btn = QPushButton("Reset to Defaults")
         reset_btn.clicked.connect(self.reset_to_defaults)
         reset_btn.setStyleSheet(self._button_style())
+
+        # On macOS, expose a "Re-run setup…" button so the user can
+        # re-trigger the onboarding wizard if they skipped or denied
+        # permissions on first launch.
+        if sys.platform == 'darwin':
+            rerun_btn = QPushButton("Re-run setup…")
+            rerun_btn.clicked.connect(self.rerun_setup_requested.emit)
+            rerun_btn.setStyleSheet(self._button_style())
+            button_layout.addWidget(rerun_btn)
 
         button_layout.addStretch()
         button_layout.addWidget(reset_btn)
