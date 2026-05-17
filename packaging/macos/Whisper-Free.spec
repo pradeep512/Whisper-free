@@ -45,6 +45,11 @@ pyobjc_binaries = (
 asset_datas = [
     (str(ROOT / 'assets' / 'app-icon.png'), 'assets'),
     (str(ROOT / 'assets' / 'app-icon-512.png'), 'assets'),
+    # CLI shim — bundled at Contents/Resources/whisper-free so the Homebrew
+    # Cask can symlink /opt/homebrew/bin/whisper-free -> it. Executable bit
+    # is restored in the cask's postflight (PyInstaller drops perms on
+    # files copied via datas).
+    (str(ROOT / 'scripts' / 'whisper-free'), '.'),
 ]
 menu_bar_icon = ROOT / 'assets' / 'menu-bar-icon.png'
 if menu_bar_icon.exists():
