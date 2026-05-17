@@ -731,12 +731,36 @@ class WhisperFreeApp(QObject):
         # Reload config (already saved by SettingsPanel)
         # Update components as needed
 
-        # Update hotkey if changed
+        # Update hotkey if changed.
+        # On macOS, recreating a pynput.GlobalHotKeys (CGEventTap under the hood)
+        # from a running Qt event loop hits a Quartz state mismatch that
+        # aborts the process with SIGTRAP. Skip the live reload — the user
+        # gets a "restart required" message and the new hotkey takes effect
+        # on next launch (it's already persisted by SettingsPanel.save_settings).
         new_hotkey = self.config.get('hotkey.primary', '<ctrl>+<space>')
-        if self.hotkey.change_hotkey(new_hotkey):
-            logger.info(f"Hotkey changed to: {new_hotkey}")
+        current_hotkey = self.hotkey.get_current_hotkey() if hasattr(self.hotkey, 'get_current_hotkey') else None
+        if sys.platform == 'darwin':
+            # Normalize so '<cmd>+<shift>+<space>' compares equal to 'cmd+shift+space'.
+            normalized_new = new_hotkey.replace('<', '').replace('>', '')
+            normalized_cur = (current_hotkey or '').replace('<', '').replace('>', '')
+            if normalized_new and normalized_new != normalized_cur:
+                logger.info(
+                    f"macOS: hotkey changed in settings ({current_hotkey} -> {new_hotkey}); "
+                    "live reload skipped to avoid Quartz CGEventTap crash. "
+                    "New hotkey takes effect on next launch."
+                )
+                QMessageBox.information(
+                    self.main_window,
+                    "Restart required",
+                    "The hotkey has been saved but won't take effect until "
+                    "you restart Whisper-Free.\n\n"
+                    "Quit from the menu bar icon and re-launch the app."
+                )
         else:
-            logger.error(f"Failed to change hotkey to: {new_hotkey}")
+            if self.hotkey.change_hotkey(new_hotkey):
+                logger.info(f"Hotkey changed to: {new_hotkey}")
+            else:
+                logger.error(f"Failed to change hotkey to: {new_hotkey}")
 
         # Update audio device if changed
         new_device = self.config.get('audio.device', None)

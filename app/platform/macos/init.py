@@ -55,7 +55,31 @@ def init_macos(app) -> None:
         pass
     set_dock_visible(show_in_dock)
 
+    # Prime macOS TCC for the Mic so PortAudio/sounddevice can actually
+    # capture audio. Without this, sounddevice opens a stream successfully
+    # but receives a silent zero-fill — TCC doesn't get triggered by
+    # PortAudio's CoreAudio path. AVCaptureDevice.requestAccess does the
+    # right thing. Safe to call every launch: it's a no-op if already
+    # granted and silent (no prompt) for the granted case.
+    _prime_microphone_tcc()
+
     _install_tray_icon(app)
+
+
+def _prime_microphone_tcc() -> None:
+    """Fire AVFoundation Mic request so sounddevice receives real audio.
+
+    Fire-and-forget: the callback runs on a CoreAudio thread and we don't
+    wait. Any TCC prompt that shows up is handled by the user; we don't
+    block the app startup on it. Subsequent sounddevice InputStream opens
+    will then capture real microphone data instead of zeros.
+    """
+    try:
+        from app.platform.macos import hotkey_perms
+        hotkey_perms.request_microphone_access(lambda _granted: None)
+        logger.debug("AVFoundation Mic TCC primed")
+    except Exception as e:
+        logger.debug(f"AVFoundation mic priming skipped: {e}")
 
 
 def apply_overlay_window_behavior(widget) -> bool:
