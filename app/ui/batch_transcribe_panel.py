@@ -146,7 +146,10 @@ class BatchTranscribePanel(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(8)
 
-        self.add_files_btn = self._create_button("Add Files", primary=True)
+        # "Add Files" is a list-management action, not a primary commit —
+        # reserve the bright accent button for "Start Batch" alone so the
+        # primary action stands out.
+        self.add_files_btn = self._create_button("Add Files")
         self.add_files_btn.clicked.connect(self._on_add_files)
         button_layout.addWidget(self.add_files_btn)
 

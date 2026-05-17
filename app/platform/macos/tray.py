@@ -13,7 +13,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap,
+    QAction, QColor, QCursor, QFont, QIcon, QPainter, QPen, QPixmap,
 )
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
@@ -63,7 +63,10 @@ class TrayController(QObject):
         self._action_quit.triggered.connect(self.quit_requested.emit)
         self._menu.addAction(self._action_quit)
 
-        self._tray.setContextMenu(self._menu)
+        # IMPORTANT: do NOT setContextMenu on macOS. With a context menu
+        # set, NSStatusItem hijacks left-clicks to open the menu, which
+        # defeats the click-to-toggle UX. Instead, we keep the QMenu
+        # around and pop it up manually on right-click (Context reason).
         self._tray.activated.connect(self._on_activated)
 
         logger.info("TrayController initialized (macOS menu bar)")
@@ -102,10 +105,18 @@ class TrayController(QObject):
     # ---- internals ----
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        # Left-click on macOS is Trigger; right-click opens the contextMenu
-        # automatically and emits Context.
-        if reason == QSystemTrayIcon.Trigger:
+        """Route clicks per the standard Mac dictation app pattern.
+
+        Left-click  → toggle recording (start/stop)
+        Right-click → open the context menu (Toggle / Open Window / Quit)
+        Double-click → same as left-click (treat as toggle)
+        """
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             self.toggle_requested.emit()
+        elif reason == QSystemTrayIcon.Context:
+            # Pop the menu under the cursor. macOS positions it sensibly
+            # because the cursor is right at the status item when clicked.
+            self._menu.popup(QCursor.pos())
 
     def _build_icon(self, icon_path: Optional[Path]) -> QIcon:
         """Load the menu-bar icon, falling back to a Qt-drawn placeholder.

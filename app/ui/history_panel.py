@@ -239,12 +239,13 @@ class HistoryPanel(QWidget):
         export_json_btn.clicked.connect(self.export_to_json)
         export_json_btn.setStyleSheet(self._button_style())
 
-        # Load More button — primary accent style.
-        from app.ui.theme import primary_button_qss
+        # Load More — pagination, not a primary action. Use the
+        # neutral secondary style so it doesn't shout for attention.
+        from app.ui.theme import secondary_button_qss
         self.load_more_btn = QPushButton("Load More…")
         self.load_more_btn.clicked.connect(self._load_more)
         self.load_more_btn.setVisible(False)
-        self.load_more_btn.setStyleSheet(primary_button_qss())
+        self.load_more_btn.setStyleSheet(secondary_button_qss())
 
         footer_layout.addWidget(clear_history_btn)
         footer_layout.addWidget(self.load_more_btn)
