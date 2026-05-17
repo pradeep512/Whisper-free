@@ -813,140 +813,32 @@ class SettingsPanel(QWidget):
         self.widgets['hotkey.primary'].setText('ctrl+space')
         self.widgets['hotkey.fallback'].setText('ctrl+shift+v')
 
-    # Stylesheet methods
+    # Style helpers — all delegate to the central theme module so visual
+    # tokens live in one place. See app/ui/theme.py.
     def _group_style(self) -> str:
-        """GroupBox stylesheet"""
-        return """
-            QGroupBox {
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding: 12px;
-                font-weight: bold;
-                color: #ffffff;
-                background-color: #252525;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-                background-color: transparent;
-            }
-        """
+        from app.ui.theme import group_qss
+        return group_qss()
 
     def _combo_style(self) -> str:
-        """ComboBox stylesheet"""
-        return """
-            QComboBox {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #ffffff;
-                min-width: 200px;
-            }
-            QComboBox:hover {
-                border-color: #0078d4;
-            }
-            QComboBox::drop-down {
-                border: none;
-                padding-right: 8px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                selection-background-color: #0078d4;
-                color: #ffffff;
-            }
-        """
+        from app.ui.theme import combo_qss
+        return combo_qss()
 
     def _lineedit_style(self) -> str:
-        """LineEdit stylesheet"""
-        return """
-            QLineEdit {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #ffffff;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-            }
-        """
+        from app.ui.theme import line_edit_qss
+        return line_edit_qss()
 
     def _button_style(self) -> str:
-        """Button stylesheet"""
-        return """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 8px 16px;
-                color: #ffffff;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                border-color: #4d4d4d;
-            }
-            QPushButton:pressed {
-                background-color: #4d4d4d;
-            }
-        """
+        from app.ui.theme import secondary_button_qss
+        return secondary_button_qss()
 
     def _primary_button_style(self) -> str:
-        """Primary button stylesheet"""
-        return """
-            QPushButton {
-                background-color: #0078d4;
-                border: 1px solid #0078d4;
-                border-radius: 4px;
-                padding: 10px 24px;
-                color: #ffffff;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #005a9e;
-                border-color: #005a9e;
-            }
-            QPushButton:pressed {
-                background-color: #004578;
-            }
-        """
+        from app.ui.theme import primary_button_qss
+        return primary_button_qss()
 
     def _spinbox_style(self) -> str:
-        """SpinBox stylesheet"""
-        return """
-            QSpinBox, QDoubleSpinBox {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #ffffff;
-            }
-            QSpinBox:hover, QDoubleSpinBox:hover {
-                border-color: #0078d4;
-            }
-        """
+        from app.ui.theme import spin_qss
+        return spin_qss()
 
     def _slider_style(self) -> str:
-        """Slider stylesheet"""
-        return """
-            QSlider::groove:horizontal {
-                background: #3d3d3d;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #0078d4;
-                width: 16px;
-                height: 16px;
-                margin: -5px 0;
-                border-radius: 8px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #005a9e;
-            }
-        """
+        from app.ui.theme import slider_qss
+        return slider_qss()

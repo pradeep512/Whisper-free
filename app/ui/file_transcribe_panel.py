@@ -812,114 +812,26 @@ class FileTranscribePanel(QWidget):
         return f"{mins}:{secs:02d}"
 
     # Stylesheet methods
+    # Style helpers — delegate to the central theme. See app/ui/theme.py.
     def _scroll_style(self) -> str:
-        return """
-            QScrollArea { background-color: transparent; border: none; }
-            QScrollBar:vertical {
-                background: #2d2d2d;
-                width: 10px;
-                margin: 0px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #4d4d4d;
-                min-height: 20px;
-                border-radius: 5px;
-            }
-        """
+        return "QScrollArea { background-color: transparent; border: none; }"
 
     def _group_style(self) -> str:
-        return """
-            QGroupBox {
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding: 12px;
-                font-weight: bold;
-                color: #ffffff;
-                background-color: #252525;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-            }
-        """
+        from app.ui.theme import group_qss
+        return group_qss()
 
     def _button_style(self) -> str:
-        return """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 8px 16px;
-                color: #ffffff;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                border-color: #4d4d4d;
-            }
-            QPushButton:pressed {
-                background-color: #4d4d4d;
-            }
-            QPushButton:disabled {
-                background-color: #1e1e1e;
-                color: #666666;
-                border-color: #2d2d2d;
-            }
-        """
+        from app.ui.theme import secondary_button_qss
+        return secondary_button_qss()
 
     def _primary_button_style(self) -> str:
-        return """
-            QPushButton {
-                background-color: #0078d4;
-                border: 1px solid #0078d4;
-                border-radius: 4px;
-                padding: 10px 24px;
-                color: #ffffff;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #005a9e;
-                border-color: #005a9e;
-            }
-            QPushButton:pressed {
-                background-color: #004578;
-            }
-            QPushButton:disabled {
-                background-color: #1e1e1e;
-                color: #666666;
-                border-color: #2d2d2d;
-            }
-        """
+        from app.ui.theme import primary_button_qss
+        return primary_button_qss()
 
     def _progress_bar_style(self) -> str:
-        return """
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                background-color: #2d2d2d;
-                text-align: center;
-                color: #ffffff;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d4;
-                border-radius: 3px;
-            }
-        """
+        from app.ui.theme import progress_qss
+        return progress_qss()
 
     def _text_edit_style(self) -> str:
-        return """
-            QTextEdit {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 8px;
-                color: #ffffff;
-                font-family: 'Courier New', monospace;
-                font-size: 13px;
-            }
-        """
+        from app.ui.theme import text_edit_qss
+        return text_edit_qss()

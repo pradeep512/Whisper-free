@@ -66,9 +66,16 @@ class HistoryPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
+        from app.ui.theme import (
+            BG_ELEVATED, BG_HOVER, BG_PRESSED, SEPARATOR,
+            TEXT, TEXT_MUTED, RADIUS_M, RADIUS_S, system_accent,
+        )
+
         # Header
-        header_label = QLabel("Transcription History")
-        header_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        header_label = QLabel("History")
+        header_label.setStyleSheet(
+            f"font-size: 22px; font-weight: 700; color: {TEXT};"
+        )
         layout.addWidget(header_label)
 
         # Search bar
@@ -76,41 +83,41 @@ class HistoryPanel(QWidget):
         search_layout.setSpacing(8)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search transcriptions...")
+        self.search_input.setPlaceholderText("Search transcriptions…")
         self.search_input.textChanged.connect(self.search)
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 6px;
-                padding: 10px 12px;
-                font-size: 14px;
-                color: #ffffff;
-            }
-            QLineEdit:focus {
-                border: 1px solid #0078d4;
-            }
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {BG_ELEVATED};
+                border: 1px solid {SEPARATOR};
+                border-radius: {RADIUS_M}px;
+                padding: 8px 12px;
+                font-size: 13px;
+                color: {TEXT};
+                selection-background-color: {system_accent()};
+                selection-color: white;
+            }}
+            QLineEdit:focus {{ border-color: {system_accent()}; }}
         """)
 
         clear_btn = QPushButton("×")
-        clear_btn.setFixedSize(40, 40)
+        clear_btn.setFixedSize(34, 34)
         clear_btn.clicked.connect(self._clear_search)
-        clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 6px;
-                font-size: 20px;
-                font-weight: bold;
-                color: #888888;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                color: #ffffff;
-            }
-            QPushButton:pressed {
-                background-color: #4d4d4d;
-            }
+        clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BG_ELEVATED};
+                border: 1px solid {SEPARATOR};
+                border-radius: {RADIUS_M}px;
+                font-size: 18px;
+                font-weight: 500;
+                color: {TEXT_MUTED};
+            }}
+            QPushButton:hover {{
+                background-color: {BG_HOVER};
+                color: {TEXT};
+            }}
+            QPushButton:pressed {{
+                background-color: {BG_PRESSED};
+            }}
         """)
 
         search_layout.addWidget(self.search_input, 1)
@@ -122,7 +129,11 @@ class HistoryPanel(QWidget):
         filter_layout.setSpacing(8)
 
         filter_label = QLabel("Filter:")
-        filter_label.setStyleSheet("color: #888888; font-size: 12px;")
+        from app.ui.theme import (
+            BG_ELEVATED, BG_HOVER, SEPARATOR, TEXT, TEXT_MUTED,
+            RADIUS_M, system_accent,
+        )
+        filter_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         filter_layout.addWidget(filter_label)
 
         self.filter_all_btn = QPushButton("All")
@@ -130,33 +141,34 @@ class HistoryPanel(QWidget):
         self.filter_all_btn.setChecked(True)
         self.filter_all_btn.clicked.connect(lambda: self._set_filter(None))
 
-        self.filter_ptt_btn = QPushButton("🎤 Push-to-Talk")
+        self.filter_ptt_btn = QPushButton("Push-to-Talk")
         self.filter_ptt_btn.setCheckable(True)
         self.filter_ptt_btn.clicked.connect(lambda: self._set_filter('microphone'))
 
-        self.filter_file_btn = QPushButton("📁 Files")
+        self.filter_file_btn = QPushButton("Files")
         self.filter_file_btn.setCheckable(True)
         self.filter_file_btn.clicked.connect(lambda: self._set_filter('file'))
 
-        # Style filter buttons
-        filter_btn_style = """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
+        # Style filter buttons — toggle-pill look (Mac-native).
+        filter_btn_style = f"""
+            QPushButton {{
+                background-color: {BG_ELEVATED};
+                border: 1px solid {SEPARATOR};
+                border-radius: {RADIUS_M}px;
+                padding: 5px 14px;
                 font-size: 12px;
-                color: #888888;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                color: #ffffff;
-            }
-            QPushButton:checked {
-                background-color: #0078d4;
-                border: 1px solid #0078d4;
-                color: #ffffff;
-            }
+                color: {TEXT_MUTED};
+            }}
+            QPushButton:hover {{
+                background-color: {BG_HOVER};
+                color: {TEXT};
+            }}
+            QPushButton:checked {{
+                background-color: {system_accent()};
+                border-color: {system_accent()};
+                color: white;
+                font-weight: 600;
+            }}
         """
         self.filter_all_btn.setStyleSheet(filter_btn_style)
         self.filter_ptt_btn.setStyleSheet(filter_btn_style)
@@ -241,27 +253,12 @@ class HistoryPanel(QWidget):
         export_json_btn.clicked.connect(self.export_to_json)
         export_json_btn.setStyleSheet(self._button_style())
 
-        # Load More button
-        self.load_more_btn = QPushButton("Load More...")
+        # Load More button — primary accent style.
+        from app.ui.theme import primary_button_qss
+        self.load_more_btn = QPushButton("Load More…")
         self.load_more_btn.clicked.connect(self._load_more)
-        self.load_more_btn.setVisible(False)  # Hidden initially
-        self.load_more_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0078d4;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                color: #ffffff;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #005a9e;
-            }
-            QPushButton:pressed {
-                background-color: #004578;
-            }
-        """)
+        self.load_more_btn.setVisible(False)
+        self.load_more_btn.setStyleSheet(primary_button_qss())
 
         footer_layout.addWidget(clear_history_btn)
         footer_layout.addWidget(self.load_more_btn)
@@ -271,25 +268,9 @@ class HistoryPanel(QWidget):
         layout.addLayout(footer_layout)
 
     def _button_style(self) -> str:
-        """Get standard button stylesheet"""
-        return """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-                color: #cccccc;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #0078d4;
-                border-color: #0078d4;
-            }
-            QPushButton:pressed {
-                background-color: #005a9e;
-            }
-        """
+        """Get standard button stylesheet — delegates to the central theme."""
+        from app.ui.theme import secondary_button_qss
+        return secondary_button_qss()
 
     def _clear_search(self):
         """Clear search input"""
@@ -396,7 +377,7 @@ class HistoryPanel(QWidget):
             self.load_more_btn.setVisible(self.has_more_items)
             if self.has_more_items:
                 remaining = total_count - (self.current_offset + len(transcriptions))
-                self.load_more_btn.setText(f"Load More... ({remaining} remaining)")
+                self.load_more_btn.setText(f"Load More…({remaining} remaining)")
             else:
                 self.load_more_btn.setText("Load More...")
 

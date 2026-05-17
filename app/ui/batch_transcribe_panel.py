@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 class FileStatus:
-    """File transcription status constants with icons"""
-    PENDING = "⏸️ Pending"
-    RUNNING = "▶️ Processing"
-    PAUSED = "⏸️ Paused"
-    COMPLETED = "✅ Completed"
-    FAILED = "❌ Failed"
+    """File transcription status labels (plain text — Mac convention)."""
+    PENDING = "Pending"
+    RUNNING = "Processing"
+    PAUSED = "Paused"
+    COMPLETED = "Completed"
+    FAILED = "Failed"
 
 
 class BatchTranscribePanel(QWidget):
@@ -146,19 +146,19 @@ class BatchTranscribePanel(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(8)
 
-        self.add_files_btn = self._create_button("➕ Add Files", "#0078d4")
+        self.add_files_btn = self._create_button("Add Files", primary=True)
         self.add_files_btn.clicked.connect(self._on_add_files)
         button_layout.addWidget(self.add_files_btn)
 
-        self.remove_files_btn = self._create_button("➖ Remove Selected", "#d41e00")
+        self.remove_files_btn = self._create_button("Remove", variant="danger")
         self.remove_files_btn.clicked.connect(self._on_remove_files)
         button_layout.addWidget(self.remove_files_btn)
 
-        self.start_batch_btn = self._create_button("▶️ Start Batch", "#107c10")
+        self.start_batch_btn = self._create_button("Start Batch", primary=True)
         self.start_batch_btn.clicked.connect(self._on_start_batch)
         button_layout.addWidget(self.start_batch_btn)
 
-        self.clear_completed_btn = self._create_button("🗑️ Clear Completed", "#666666")
+        self.clear_completed_btn = self._create_button("Clear Completed")
         self.clear_completed_btn.clicked.connect(self._on_clear_completed)
         button_layout.addWidget(self.clear_completed_btn)
 
@@ -199,43 +199,26 @@ class BatchTranscribePanel(QWidget):
 
         layout.addLayout(progress_layout)
 
-    def _create_button(self, text: str, color: str) -> QPushButton:
-        """Create styled button"""
+    def _create_button(self, text: str, primary: bool = False,
+                       variant: str = None) -> QPushButton:
+        """Create a styled button using the central theme.
+
+        Args:
+            text: Button label.
+            primary: If True, use the accent-color filled style.
+            variant: Optional 'danger' for destructive actions.
+        """
+        from app.ui.theme import (
+            primary_button_qss, secondary_button_qss, danger_button_qss,
+        )
         btn = QPushButton(text)
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                color: #ffffff;
-            }}
-            QPushButton:hover {{
-                background-color: {self._lighten_color(color)};
-            }}
-            QPushButton:pressed {{
-                background-color: {self._darken_color(color)};
-            }}
-            QPushButton:disabled {{
-                background-color: #3d3d3d;
-                color: #666666;
-            }}
-        """)
+        if variant == 'danger':
+            btn.setStyleSheet(danger_button_qss())
+        elif primary:
+            btn.setStyleSheet(primary_button_qss())
+        else:
+            btn.setStyleSheet(secondary_button_qss())
         return btn
-
-    def _lighten_color(self, hex_color: str) -> str:
-        """Lighten a hex color by 20%"""
-        color = QColor(hex_color)
-        h, s, l, a = color.getHsl()
-        return QColor.fromHsl(h, s, min(255, int(l * 1.2)), a).name()
-
-    def _darken_color(self, hex_color: str) -> str:
-        """Darken a hex color by 20%"""
-        color = QColor(hex_color)
-        h, s, l, a = color.getHsl()
-        return QColor.fromHsl(h, s, int(l * 0.8), a).name()
 
     def _connect_signals(self):
         """Connect to queue manager signals"""
@@ -687,10 +670,10 @@ class BatchTranscribePanel(QWidget):
                     self,
                     "Batch Complete with Errors",
                     f"Batch transcription finished with some errors.\n\n"
-                    f"✅ Completed: {completed_count}\n"
-                    f"❌ Failed: {failed_count}\n"
+                    f"Completed: {completed_count}\n"
+                    f"Failed: {failed_count}\n"
                     f"Total: {total_files}\n\n"
-                    f"Click on the ℹ️ button next to failed files to view error details.",
+                    f"Click on the info button next to failed files to view error details.",
                     QMessageBox.Ok | QMessageBox.Retry
                 )
 
