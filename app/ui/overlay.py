@@ -411,12 +411,33 @@ class DynamicIslandOverlay(QWidget):
         # Start animation
         self._animation_group.start()
 
-        # Show window if hidden
-        if not self.isVisible() and self._mode != OverlayMode.HIDDEN:
-            self.show()
-        elif self._mode == OverlayMode.HIDDEN:
+        # Ensure the overlay surfaces. Always show + raise — even if Qt
+        # thinks it's already visible — to defeat focus-race conditions
+        # when the trigger came from inside a focused window (e.g. clicking
+        # the in-window Record button, or selecting a tray menu item that
+        # just dismissed a nested QMenu event loop).
+        if self._mode != OverlayMode.HIDDEN:
+            # Defer via QTimer.singleShot(0, ...) so any nested event loop
+            # (the tray's QMenu, a context menu dismiss animation, etc.)
+            # has finished unwinding before we try to bring the overlay up.
+            QTimer.singleShot(0, self._ensure_visible)
+        else:
             # Hide after animation completes
             self._animation_group.finished.connect(self.hide)
+
+    def _ensure_visible(self) -> None:
+        """Force the overlay window to be on screen and on top.
+
+        Called via QTimer.singleShot(0) from set_mode/_animate_to_geometry
+        so any nested event loop has finished. Tool windows on macOS can
+        silently fail to come to front when the trigger originated from a
+        focused window; show()+raise_() is the proven combo.
+        """
+        try:
+            self.show()
+            self.raise_()
+        except Exception as e:
+            logger.warning(f"_ensure_visible failed: {e}")
 
     def _animate_opacity_only(self, target_opacity: float, duration: int = 300, on_done=None) -> None:
         """
