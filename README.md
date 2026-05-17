@@ -136,6 +136,8 @@ See `archive/docs/README_FILE_TRANSCRIPTION.md` for detailed file transcription 
 
 ## Troubleshooting
 
+For known issues being tracked for the v1.0.0 macOS release, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+
 - **Linux** — Overlay stuck in the middle on GNOME Wayland: ensure XWayland mode is active (default). Try `whisper --xwayland`.
 - **Linux/macOS** — MP3/M4A won't load: install ffmpeg.
 - **macOS** — Hotkey doesn't fire: System Settings → Privacy & Security → Accessibility → ensure Whisper-Free is listed and enabled. Re-add it if you replaced the app binary (Mac invalidates the entry on signature change).
@@ -234,7 +236,7 @@ This installs `Whisper-Free.app` into `/Applications` and a `whisper-free` CLI s
 
 ### First launch: bypass Gatekeeper
 
-Whisper-Free is currently **unsigned** (the project is funding-constrained — see the [open issue](https://github.com/pradeep512/Whisper-free/issues) for sponsoring Apple Developer Program enrollment). macOS will block the first launch with:
+Whisper-Free is currently **unsigned** — Apple Developer Program enrollment ($99/yr) is on the roadmap for a future release. Until then, macOS will block the first launch with:
 
 > *"Whisper-Free" can't be opened because Apple cannot check it for malicious software.*
 

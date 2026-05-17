@@ -59,7 +59,10 @@ class ConfigManager:
             'font_size': 14,
         },
         'storage': {
-            'database_path': '~/.config/whisper-free/history.db',
+            # database_path key intentionally omitted — the actual DB path is
+            # resolved per-platform by app.platform.paths.database_file()
+            # (~/.config/whisper-free/ on Linux,
+            #  ~/Library/Application Support/Whisper-Free/ on macOS).
             'retention_days': 30,
             'save_audio_files': False,
         },
