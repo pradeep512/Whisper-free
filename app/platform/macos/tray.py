@@ -133,25 +133,70 @@ class TrayController(QObject):
 
     @staticmethod
     def _draw_fallback_icon() -> QIcon:
-        """Draw a 36x36 white 'W' on a transparent background.
+        """Draw a simple microphone glyph on a transparent background.
 
-        Designed as a template image: white-with-alpha so macOS' dark/light
-        menu bar tints it appropriately when setIsMask(True).
+        Authored as a template image (white-with-alpha) so macOS tints it
+        for light/dark menu bar when setIsMask(True).
+
+        Geometry, scaled to a 36-px pixmap:
+          - mic body: rounded rectangle, ~10w x 14h, centered-top
+          - stand:    vertical line under the body
+          - base:     short horizontal line at the bottom
         """
-        pixmap = QPixmap(_FALLBACK_ICON_SIZE, _FALLBACK_ICON_SIZE)
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QBrush
+
+        sz = _FALLBACK_ICON_SIZE
+        pixmap = QPixmap(sz, sz)
         pixmap.fill(Qt.transparent)
 
         painter = QPainter(pixmap)
         try:
             painter.setRenderHint(QPainter.Antialiasing)
-            painter.setPen(QPen(QColor(255, 255, 255, 255), 2))
+            white = QColor(255, 255, 255, 255)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(white))
 
-            font = QFont()
-            font.setBold(True)
-            font.setPixelSize(int(_FALLBACK_ICON_SIZE * 0.7))
-            painter.setFont(font)
+            # Mic capsule — rounded rect, 30% wide, 45% tall, top-centered.
+            cap_w = sz * 0.30
+            cap_h = sz * 0.45
+            cap_x = (sz - cap_w) / 2.0
+            cap_y = sz * 0.16
+            painter.drawRoundedRect(
+                QRectF(cap_x, cap_y, cap_w, cap_h),
+                cap_w / 2.0, cap_w / 2.0,
+            )
 
-            painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
+            # U-shaped pickup (the stand bracket below the mic).
+            stroke = max(2, int(sz * 0.055))
+            pen = QPen(white, stroke)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            bracket_w = sz * 0.46
+            bracket_h = sz * 0.18
+            bracket_x = (sz - bracket_w) / 2.0
+            bracket_y = sz * 0.55
+            painter.drawArc(
+                QRectF(bracket_x, bracket_y, bracket_w, bracket_h * 2),
+                0 * 16, -180 * 16,  # bottom half of an ellipse
+            )
+
+            # Stand: vertical line from the bracket bottom to the base.
+            stand_top_y = bracket_y + bracket_h
+            stand_bot_y = sz * 0.86
+            mid_x = sz / 2.0
+            painter.drawLine(
+                int(mid_x), int(stand_top_y),
+                int(mid_x), int(stand_bot_y),
+            )
+
+            # Base: short horizontal line at the bottom.
+            base_half = sz * 0.13
+            painter.drawLine(
+                int(mid_x - base_half), int(stand_bot_y),
+                int(mid_x + base_half), int(stand_bot_y),
+            )
         finally:
             painter.end()
 

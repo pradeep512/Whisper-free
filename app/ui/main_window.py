@@ -24,7 +24,7 @@ from app.ui.theme import (
     BG, BG_ELEVATED, BG_HOVER, BG_PRESSED, SEPARATOR,
     TEXT, TEXT_MUTED, SUCCESS, WARNING, DANGER,
     RADIUS_M, system_accent, accent_hover, accent_pressed,
-    main_window_qss,
+    main_window_qss, record_button_qss,
 )
 from app.core.state_machine import ApplicationState
 
@@ -296,33 +296,12 @@ class MainWindow(QMainWindow):
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
 
-        # PTT toggle button — small accent pill styled to match the system.
+        # PTT toggle button — neutral when idle, red (universal "stop"
+        # signal) when recording. Style is swapped live in update_ptt_button.
         self.ptt_button = QPushButton("Record")
         self.ptt_button.setFixedHeight(24)
         self.ptt_button.clicked.connect(self.ptt_toggle_requested.emit)
-        self.ptt_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {system_accent()};
-                border: 1px solid {system_accent()};
-                border-radius: {RADIUS_M}px;
-                padding: 2px 14px;
-                font-size: 12px;
-                font-weight: 600;
-                color: white;
-            }}
-            QPushButton:hover {{
-                background-color: {accent_hover()};
-                border-color: {accent_hover()};
-            }}
-            QPushButton:pressed {{
-                background-color: {accent_pressed()};
-            }}
-            QPushButton:disabled {{
-                background-color: {BG_HOVER};
-                border-color: {BG_HOVER};
-                color: {TEXT_MUTED};
-            }}
-        """)
+        self.ptt_button.setStyleSheet(record_button_qss(state="idle"))
 
         # Status label
         self.status_label = QLabel("Ready")
@@ -368,24 +347,26 @@ class MainWindow(QMainWindow):
         status_bar.addPermanentWidget(stats_widget)
 
     def update_ptt_button(self, state: ApplicationState) -> None:
-        """Update PTT button label and enabled state based on app state."""
+        """Update PTT button label, style, and enabled state based on app state.
+
+        - IDLE / COMPLETED / ERROR → neutral "Record"
+        - RECORDING                → red filled "Stop"
+        - PROCESSING               → disabled neutral "Processing…"
+        """
         if self.ptt_button is None:
             return
 
-        if state == ApplicationState.IDLE:
-            self.ptt_button.setText("Record")
-            self.ptt_button.setEnabled(True)
-        elif state == ApplicationState.RECORDING:
+        if state == ApplicationState.RECORDING:
             self.ptt_button.setText("Stop")
+            self.ptt_button.setStyleSheet(record_button_qss(state="recording"))
             self.ptt_button.setEnabled(True)
         elif state == ApplicationState.PROCESSING:
             self.ptt_button.setText("Processing…")
+            self.ptt_button.setStyleSheet(record_button_qss(state="idle"))
             self.ptt_button.setEnabled(False)
-        elif state == ApplicationState.COMPLETED:
+        else:  # IDLE / COMPLETED / ERROR
             self.ptt_button.setText("Record")
-            self.ptt_button.setEnabled(True)
-        elif state == ApplicationState.ERROR:
-            self.ptt_button.setText("Record")
+            self.ptt_button.setStyleSheet(record_button_qss(state="idle"))
             self.ptt_button.setEnabled(True)
 
     def _on_sidebar_changed(self, row: int):

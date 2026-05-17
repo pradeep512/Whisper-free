@@ -46,17 +46,22 @@ RADIUS_L  = 12
 def system_accent() -> str:
     """Return Apple's signature dark-mode blue.
 
-    Note: we intentionally hard-code this rather than reading
-    QGuiApplication.palette().color(QPalette.Highlight). Qt's palette
-    translates NSColor controlAccentColor to a muted variant (typically
-    #314f78) that looks washed out next to real Mac UIs. The hard-coded
-    #0a84ff matches Apple's own apps in dark mode.
-
-    To honor the user's chosen accent color (purple/pink/etc.), bridge
-    via pyobjc and read NSColor.controlAccentColor directly — a Tier 2
-    enhancement.
+    Hard-coded; Qt's NSColor controlAccentColor translation returns a
+    washed-out #314f78 variant. To honor the user's chosen accent
+    color (purple/pink/etc.), bridge via pyobjc and read
+    NSColor.controlAccentColor directly — a Tier 2 enhancement.
     """
     return "#0a84ff"
+
+
+def selection_bg() -> str:
+    """Translucent accent for selected sidebar items, etc.
+
+    Mac convention: selected nav items get a subtle accent tint, not a
+    solid-color fill. Bright accent fills are reserved for actual buttons.
+    """
+    # rgba notation works in QSS.
+    return "rgba(10, 132, 255, 60)"
 
 
 def accent_hover() -> str:
@@ -113,7 +118,7 @@ def main_window_qss() -> str:
             padding: 4px 8px;
         }}
 
-        /* Sidebar — Mac-style rounded pill on selection */
+        /* Sidebar — Mac-style translucent pill on selection */
         QListWidget {{
             background-color: {BG};
             border: none;
@@ -122,15 +127,15 @@ def main_window_qss() -> str:
             padding: 8px 6px;
         }}
         QListWidget::item {{
-            padding: 8px 12px;
-            margin: 2px 6px;
+            padding: 7px 12px;
+            margin: 1px 6px;
             background-color: transparent;
             border-radius: {RADIUS_M}px;
             color: {TEXT_MUTED};
         }}
         QListWidget::item:selected {{
-            background-color: {system_accent()};
-            color: white;
+            background-color: {selection_bg()};
+            color: {TEXT};
             font-weight: 600;
         }}
         QListWidget::item:hover:!selected {{
@@ -263,6 +268,63 @@ def danger_button_qss() -> str:
         }}
         QPushButton:pressed {{
             background-color: {_shift(DANGER, 0.85)};
+        }}
+    """
+
+
+def record_button_qss(state: str = "idle", height: int = 24) -> str:
+    """State-aware styling for the status-bar Record button.
+
+    states:
+      'idle'      — neutral secondary (subtle; doesn't grab attention)
+      'recording' — filled red (universal "stop" signal)
+      'processing'— disabled gray
+    """
+    if state == "recording":
+        return f"""
+            QPushButton {{
+                background-color: {DANGER};
+                border: 1px solid {DANGER};
+                border-radius: {RADIUS_M}px;
+                padding: 2px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                color: white;
+                min-height: {height}px;
+                max-height: {height}px;
+            }}
+            QPushButton:hover {{
+                background-color: {_shift(DANGER, 1.10)};
+                border-color: {_shift(DANGER, 1.10)};
+            }}
+            QPushButton:pressed {{
+                background-color: {_shift(DANGER, 0.88)};
+            }}
+        """
+    # 'idle' (and fallback for 'processing'; setEnabled(False) handles the look)
+    return f"""
+        QPushButton {{
+            background-color: {BG_HOVER};
+            border: 1px solid {SEPARATOR};
+            border-radius: {RADIUS_M}px;
+            padding: 2px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            color: {TEXT};
+            min-height: {height}px;
+            max-height: {height}px;
+        }}
+        QPushButton:hover {{
+            background-color: {BG_PRESSED};
+            border-color: {BG_PRESSED};
+        }}
+        QPushButton:pressed {{
+            background-color: {SEPARATOR};
+        }}
+        QPushButton:disabled {{
+            background-color: {BG_ELEVATED};
+            border-color: {BG_ELEVATED};
+            color: {TEXT_MUTED};
         }}
     """
 

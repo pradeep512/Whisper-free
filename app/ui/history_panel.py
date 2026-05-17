@@ -149,11 +149,13 @@ class HistoryPanel(QWidget):
         self.filter_file_btn.setCheckable(True)
         self.filter_file_btn.clicked.connect(lambda: self._set_filter('file'))
 
-        # Style filter buttons — toggle-pill look (Mac-native).
+        # Style filter buttons — toggle-pill look. Checked state uses a
+        # subtle elevated background instead of a solid accent fill, so
+        # the segmented control doesn't compete with primary actions.
         filter_btn_style = f"""
             QPushButton {{
-                background-color: {BG_ELEVATED};
-                border: 1px solid {SEPARATOR};
+                background-color: transparent;
+                border: 1px solid transparent;
                 border-radius: {RADIUS_M}px;
                 padding: 5px 14px;
                 font-size: 12px;
@@ -164,9 +166,9 @@ class HistoryPanel(QWidget):
                 color: {TEXT};
             }}
             QPushButton:checked {{
-                background-color: {system_accent()};
-                border-color: {system_accent()};
-                color: white;
+                background-color: {BG_PRESSED};
+                border-color: {SEPARATOR};
+                color: {TEXT};
                 font-weight: 600;
             }}
         """
@@ -222,27 +224,11 @@ class HistoryPanel(QWidget):
         footer_layout = QHBoxLayout()
         footer_layout.setSpacing(8)
 
-        # Clear History Button
+        # Clear History — destructive action, uses the danger style.
+        from app.ui.theme import danger_button_qss
         clear_history_btn = QPushButton("Clear History")
         clear_history_btn.clicked.connect(self._confirm_clear_history)
-        clear_history_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #d32f2f;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-                color: #ff5252;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-                color: #ffffff;
-            }
-            QPushButton:pressed {
-                background-color: #b71c1c;
-            }
-        """)
+        clear_history_btn.setStyleSheet(danger_button_qss())
 
         # Export buttons
         export_txt_btn = QPushButton("Export Text")
