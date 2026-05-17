@@ -14,6 +14,7 @@ License: MIT
 from enum import Enum
 import math
 import os
+import sys
 import time
 from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout
 from PySide6.QtGui import QPainter, QColor, QPainterPath, QFont, QFontMetrics, QCursor
@@ -171,7 +172,18 @@ class DynamicIslandOverlay(QWidget):
         geometry changes, we skip geometry animation on Wayland and set
         geometry directly instead.
         """
-        self._is_wayland = os.environ.get('XDG_SESSION_TYPE', '') == 'wayland'
+        # _is_wayland is Linux-only. On macOS XDG_SESSION_TYPE is unset, but we
+        # guard with sys.platform so the Wayland code paths never activate
+        # even if someone weirdly sets the env var on Mac.
+        self._is_wayland = (
+            sys.platform.startswith('linux')
+            and os.environ.get('XDG_SESSION_TYPE', '') == 'wayland'
+        )
+
+        # Tracks whether we've applied macOS-specific NSWindow collection
+        # behavior. Applied once on first show (NSWindow doesn't exist until
+        # the widget is realized).
+        self._macos_window_behavior_applied = False
 
         flags = (
             Qt.FramelessWindowHint |
@@ -810,6 +822,34 @@ class DynamicIslandOverlay(QWidget):
         # Use elided text if no wrapping requested and it overflows?
         # For now, just draw.
         painter.drawText(target_rect, align, text)
+
+    def showEvent(self, event):
+        """Apply macOS-native overlay behavior on first show.
+
+        QWidget only materializes its NSView/NSWindow when it is first shown,
+        so winId() returns 0 before that. Hooking into showEvent guarantees
+        the backing NSWindow exists when we try to set collection behavior.
+        Idempotent — only applies once.
+        """
+        super().showEvent(event)
+        self._apply_macos_window_behavior_if_needed()
+
+    def _apply_macos_window_behavior_if_needed(self) -> None:
+        """One-time apply of NSWindow collection behavior on macOS.
+
+        Makes the overlay appear across all Spaces and over full-screen apps.
+        No-op on non-darwin or when pyobjc is unavailable.
+        """
+        if self._macos_window_behavior_applied:
+            return
+        if sys.platform != 'darwin':
+            return
+        try:
+            from app.platform.macos.init import apply_overlay_window_behavior
+            if apply_overlay_window_behavior(self):
+                self._macos_window_behavior_applied = True
+        except Exception as e:
+            logger.debug(f"_apply_macos_window_behavior_if_needed: {e}")
 
     def mousePressEvent(self, event):
         """Handle mouse clicks."""

@@ -58,6 +58,75 @@ def init_macos(app) -> None:
     _install_tray_icon(app)
 
 
+def apply_overlay_window_behavior(widget) -> bool:
+    """Apply macOS-native collection behavior to a Qt widget's NSWindow.
+
+    Makes the overlay appear:
+      - On every Space (CanJoinAllSpaces) — not just the current desktop.
+      - Above full-screen apps (FullScreenAuxiliary) — Safari, Xcode, etc.
+      - Stationary across Mission Control / Spaces transitions.
+
+    These are the three flags every always-on-top utility uses (Rectangle,
+    Magnet, Bartender, Hammerspoon overlays).
+
+    Must be called AFTER the widget has been shown at least once — Qt only
+    materializes the backing NSView/NSWindow on first show, so winId()
+    returns 0 before that.
+
+    Args:
+        widget: A QWidget that has already been shown once.
+
+    Returns:
+        True on success; False if pyobjc is unavailable, the NSWindow does
+        not yet exist, or the call raised.
+    """
+    try:
+        import objc  # type: ignore[import-not-found]
+        from AppKit import (  # type: ignore[import-not-found]
+            NSWindowCollectionBehaviorCanJoinAllSpaces,
+            NSWindowCollectionBehaviorFullScreenAuxiliary,
+            NSWindowCollectionBehaviorStationary,
+        )
+    except ImportError:
+        logger.warning(
+            "pyobjc not installed; overlay will only appear on the current "
+            "Space and below full-screen apps. "
+            "Install with: pip install -r requirements-macos.txt"
+        )
+        return False
+
+    try:
+        view_ptr = int(widget.winId())
+        if view_ptr == 0:
+            logger.debug(
+                "winId()==0; widget not yet shown — cannot apply NSWindow behavior"
+            )
+            return False
+
+        # Qt's WId on macOS is an NSView*. Wrap it as a pyobjc object so we
+        # can navigate to its NSWindow.
+        ns_view = objc.objc_object(c_void_p=view_ptr)
+        ns_window = ns_view.window()
+        if ns_window is None:
+            logger.debug("NSView has no associated NSWindow yet")
+            return False
+
+        behavior = (
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorFullScreenAuxiliary
+            | NSWindowCollectionBehaviorStationary
+        )
+        ns_window.setCollectionBehavior_(behavior)
+        logger.info(
+            "Applied NSWindow collection behavior to overlay: "
+            "CanJoinAllSpaces | FullScreenAuxiliary | Stationary"
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to apply overlay NSWindow behavior: {e}")
+        return False
+
+
 def set_dock_visible(visible: bool) -> bool:
     """Show or hide the Dock icon by switching NSApp's activation policy.
 
