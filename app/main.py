@@ -1016,8 +1016,40 @@ class WhisperFreeApp(QObject):
         self.app.quit()
 
 
+def _handle_ipc_toggle_and_exit() -> int:
+    """Short-circuit launch mode used by `scripts/whisper-free --toggle`.
+
+    Sends a 'toggle' IPC command to the running Whisper-Free instance and
+    exits. Does NOT construct the full app / UI / engine — keeps invocation
+    cheap (~50ms vs ~5s for cold launch with model load).
+
+    Returns:
+        0 if the toggle was delivered, 1 if no running instance was found.
+    """
+    # Construct a minimal QCoreApplication so QLocalSocket can use the Qt
+    # event loop. We don't need full QApplication (no widgets).
+    from PySide6.QtCore import QCoreApplication
+    from app.core.ipc_server import send_ipc_command
+
+    _ = QCoreApplication(sys.argv)
+    if send_ipc_command('toggle'):
+        return 0
+    print('Whisper-Free is not running.', file=sys.stderr)
+    return 1
+
+
 def main():
-    """Main entry point"""
+    """Main entry point.
+
+    Special invocation modes (checked before constructing WhisperFreeApp):
+        --ipc-toggle: send 'toggle' to the running instance and exit.
+                      Used by the CLI shim scripts/whisper-free.
+
+    Default: launch the full app.
+    """
+    if '--ipc-toggle' in sys.argv:
+        sys.exit(_handle_ipc_toggle_and_exit())
+
     try:
         app = WhisperFreeApp()
         sys.exit(app.run())

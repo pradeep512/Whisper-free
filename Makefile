@@ -30,3 +30,18 @@ install:
 uninstall:
 	@echo "Removing $(WHISPER_BIN)"
 	sudo rm -f "$(WHISPER_BIN)"
+
+# ---- macOS targets ---------------------------------------------------------
+
+.PHONY: run-macos
+run-macos:
+	@if [ ! -x "$(VENV_PY)" ]; then \
+		echo "Virtualenv not found: $(VENV_PY)"; \
+		echo "Create it with: python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements-macos.txt"; \
+		exit 1; \
+	fi
+	PYTHONPATH="$(REPO_ROOT)" "$(VENV_PY)" -m app.main
+
+.PHONY: build-macos
+build-macos:
+	@./scripts/build_macos.sh
