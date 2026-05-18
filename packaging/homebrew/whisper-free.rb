@@ -16,9 +16,7 @@
 #     --sha256 NEW_SHA256_OF_DMG
 cask "whisper-free" do
   version "1.0.0"
-  # Replace with the actual DMG SHA256 from dist/Whisper-Free-${version}.dmg.sha256
-  # produced by scripts/build_macos.sh.
-  sha256 :no_check
+  sha256 "f836b2957ee7a3892f0d8fcb02bd0460b5a359c88d943711382049cb9549c883"
 
   url "https://github.com/pradeep512/Whisper-free/releases/download/v#{version}/Whisper-Free-#{version}.dmg",
       verified: "github.com/pradeep512/Whisper-free/"
