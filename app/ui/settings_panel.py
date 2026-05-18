@@ -23,6 +23,7 @@ from app.core.audio_capture import AudioRecorder
 from app.core.whisper_engine import (
     WhisperEngine, valid_models, model_memory_reqs, get_engine_class,
 )
+from app.ui.widgets import ModernCheckBox
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class SettingsPanel(QWidget):
 
         form = QFormLayout(group)
         form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Get available memory (VRAM on Linux/NVIDIA, unified on Apple Silicon)
         available_vram = get_engine_class().get_available_vram()
@@ -242,7 +243,7 @@ class SettingsPanel(QWidget):
 
         form = QFormLayout(group)
         form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Device selector
         device_combo = QComboBox()
@@ -269,13 +270,13 @@ class SettingsPanel(QWidget):
         form.addRow("", test_btn)
 
         # Noise reduction checkbox
-        noise_cb = QCheckBox("Enable noise reduction")
+        noise_cb = ModernCheckBox("Enable noise reduction")
         noise_cb.setStyleSheet("color: #cccccc;")
         self.widgets['audio.noise_reduction'] = noise_cb
         form.addRow("", noise_cb)
 
         # VAD checkbox
-        vad_cb = QCheckBox("Enable Voice Activity Detection")
+        vad_cb = ModernCheckBox("Enable Voice Activity Detection")
         vad_cb.setStyleSheet("color: #cccccc;")
         self.widgets['audio.vad_enabled'] = vad_cb
         form.addRow("", vad_cb)
@@ -289,7 +290,7 @@ class SettingsPanel(QWidget):
 
         form = QFormLayout(group)
         form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Primary hotkey
         primary_layout = QHBoxLayout()
@@ -338,10 +339,10 @@ class SettingsPanel(QWidget):
 
         form = QFormLayout(group)
         form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Enabled checkbox
-        enabled_cb = QCheckBox("Enable overlay")
+        enabled_cb = ModernCheckBox("Enable overlay")
         enabled_cb.setStyleSheet("color: #cccccc;")
         self.widgets['overlay.enabled'] = enabled_cb
         form.addRow("", enabled_cb)
@@ -394,10 +395,10 @@ class SettingsPanel(QWidget):
 
         form = QFormLayout(group)
         form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Open at Login — uses SMAppService (macOS 13+).
-        open_at_login_cb = QCheckBox("Open Whisper-Free at login")
+        open_at_login_cb = ModernCheckBox("Open Whisper-Free at login")
         open_at_login_cb.setStyleSheet("color: #cccccc;")
         open_at_login_cb.setToolTip(
             "Start Whisper-Free automatically when you log in. "
@@ -409,7 +410,7 @@ class SettingsPanel(QWidget):
         form.addRow("", open_at_login_cb)
 
         # Show in Dock — toggles NSApp activation policy live.
-        show_in_dock_cb = QCheckBox("Show Whisper-Free in the Dock")
+        show_in_dock_cb = ModernCheckBox("Show Whisper-Free in the Dock")
         show_in_dock_cb.setStyleSheet("color: #cccccc;")
         show_in_dock_cb.setToolTip(
             "By default Whisper-Free is a menu-bar agent (no Dock icon). "
@@ -464,12 +465,12 @@ class SettingsPanel(QWidget):
 
         form = QFormLayout(group)
         form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # fp16 checkbox. On macOS the MLX backend manages precision internally,
         # so this setting is irrelevant — we keep the widget for cross-platform
         # config parity but disable it with an explanatory tooltip.
-        fp16_cb = QCheckBox("fp16 (GPU optimization)")
+        fp16_cb = ModernCheckBox("fp16 (GPU optimization)")
         fp16_cb.setStyleSheet("color: #cccccc;")
         if sys.platform == 'darwin':
             fp16_cb.setEnabled(False)
@@ -795,24 +796,32 @@ class SettingsPanel(QWidget):
         return super().eventFilter(obj, event)
 
     def _reflow_grid(self):
+        """Reflow setting groups into a 2-column grid (3 rows on macOS).
+
+        macOS layout:
+            ┌─ Whisper Model ─┬─ Audio ───────┐
+            ├─ Hotkey ────────┼─ Overlay ─────┤
+            ├─ macOS ─────────┼─ Advanced ────┤
+            └─────────────────┴───────────────┘
+
+        Linux has 5 groups so the last cell stays empty — that's fine,
+        the empty space sits in the bottom-right corner.
         """
-        Reflow groups into grid.
-        Fixed layout: 2 columns.
-        """
-        # Clear layout
+        # Clear layout in place — takeAt(0) returns each item, we drop them.
         while self.grid_layout.count():
             self.grid_layout.takeAt(0)
-            
-        cols = 1
-            
+
+        cols = 2
         for i, widget in enumerate(self.setting_groups):
             row = i // cols
             col = i % cols
             self.grid_layout.addWidget(widget, row, col)
-            
-        # Set stretch
+
+        # Equal-width columns; allow rows to size to their content.
         for c in range(cols):
             self.grid_layout.setColumnStretch(c, 1)
+        self.grid_layout.setHorizontalSpacing(16)
+        self.grid_layout.setVerticalSpacing(16)
 
     # Stylesheet methods
     def _reset_hotkeys(self):
