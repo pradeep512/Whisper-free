@@ -59,6 +59,28 @@ def _estimate_model_mb(model_name: str) -> int:
     return _MODEL_DOWNLOAD_MB.get(model_name, 500)
 
 
+def _is_model_cached(model_name: str) -> bool:
+    """True if the MLX model for `model_name` is already in our HF cache.
+
+    HuggingFace caches under HF_HOME/hub/models--<org>--<repo>/snapshots/.
+    We only check that the snapshots dir exists and is non-empty — good
+    enough to decide whether to show the "downloading…" dialog.
+    """
+    if sys.platform != 'darwin':
+        return False
+    try:
+        from app.core.whisper_engine_mlx import MLX_MODEL_REPOS
+        repo = MLX_MODEL_REPOS.get(model_name)
+        if not repo:
+            return False
+        from app.platform import paths
+        cache_root = paths.models_dir() / "huggingface" / "hub"
+        snapshots = cache_root / f"models--{repo.replace('/', '--')}" / "snapshots"
+        return snapshots.is_dir() and any(snapshots.iterdir())
+    except Exception:
+        return False
+
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -275,24 +297,28 @@ class WhisperFreeApp(QObject):
             device = self.config.get('whisper.device', 'cuda')
             logger.info(f"Loading Whisper model: {model_name} (device hint: {device})")
 
-            # On first launch the model has to be downloaded from HuggingFace
-            # (~75 MB for tiny, ~470 MB for small, up to ~3 GB for large).
-            # That call blocks for up to a few minutes on a slow connection;
-            # show an indeterminate progress dialog so the user knows the app
-            # hasn't hung. If the model is already cached the dialog flashes
-            # briefly (~1 s) and dismisses.
-            init_progress = QProgressDialog(
-                f"Loading Whisper model '{model_name}'…\n"
-                f"On first launch this downloads ~{_estimate_model_mb(model_name)} MB "
-                f"from HuggingFace.",
-                None, 0, 0, None,
-            )
-            init_progress.setWindowTitle("Whisper-Free")
-            init_progress.setWindowModality(Qt.ApplicationModal)
-            init_progress.setCancelButton(None)
-            init_progress.setMinimumWidth(380)
-            init_progress.show()
-            self.app.processEvents()   # force a render before we block
+            # Only show the "downloading…" dialog on the actual first
+            # launch for this model — when the model is already cached,
+            # the load takes ~1 s and a dialog would just flash uselessly.
+            # We also discovered that the modal dialog can leave residual
+            # state that crashes pynput's CGEventTap setup later, so
+            # skipping it on cached launches is doubly important.
+            init_progress = None
+            if not _is_model_cached(model_name):
+                init_progress = QProgressDialog(
+                    f"Downloading Whisper model '{model_name}'…\n"
+                    f"~{_estimate_model_mb(model_name)} MB from HuggingFace. "
+                    f"This is a one-time download.",
+                    None, 0, 0, None,
+                )
+                init_progress.setWindowTitle("Whisper-Free")
+                # Non-modal: we don't want this dialog to interfere with
+                # the pynput CGEventTap that gets installed later.
+                init_progress.setWindowModality(Qt.NonModal)
+                init_progress.setCancelButton(None)
+                init_progress.setMinimumWidth(380)
+                init_progress.show()
+                self.app.processEvents()
 
             try:
                 self.whisper = create_whisper_engine(
@@ -300,7 +326,10 @@ class WhisperFreeApp(QObject):
                     device=device,
                 )
             finally:
-                init_progress.close()
+                if init_progress is not None:
+                    init_progress.close()
+                    init_progress.deleteLater()
+                    self.app.processEvents()
 
             logger.info(
                 f"Whisper engine ready: {self.whisper!r} "
