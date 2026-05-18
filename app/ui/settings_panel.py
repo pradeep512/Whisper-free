@@ -20,7 +20,9 @@ import sys
 
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QColor, QBrush
 from app.core.audio_capture import AudioRecorder
-from app.core.whisper_engine import WhisperEngine
+from app.core.whisper_engine import (
+    WhisperEngine, valid_models, model_memory_reqs, get_engine_class,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,18 +156,21 @@ class SettingsPanel(QWidget):
         form.setSpacing(12)
         form.setContentsMargins(16, 24, 16, 16)
 
-        # Get available VRAM
-        available_vram = WhisperEngine.get_available_vram()
-        
-        # Model dropdown with VRAM validation
+        # Get available memory (VRAM on Linux/NVIDIA, unified on Apple Silicon)
+        available_vram = get_engine_class().get_available_vram()
+        memory_table = model_memory_reqs()
+
+        # Model dropdown — populated from the actual platform's engine so
+        # the choices match what can actually be loaded (MLX on macOS
+        # supports a slightly different set than torch on Linux).
         model_combo = QComboBox()
         self.widgets['whisper.model'] = model_combo
-        
+
         # Use StandardItemModel to support disabling items
         model_item_model = QStandardItemModel()
-        
-        for model_name in WhisperEngine.VALID_MODELS:
-            req_vram = WhisperEngine.MODEL_VRAM_REQS.get(model_name, 0)
+
+        for model_name in valid_models():
+            req_vram = memory_table.get(model_name, 0)
             item = QStandardItem(model_name)
             
             # Disable if insufficient VRAM (with 0.5 GB buffer)
@@ -754,8 +759,8 @@ class SettingsPanel(QWidget):
         # Emit change signal
         self.model_changed.emit(model_name)
         
-        # Update estimate label
-        req_vram = WhisperEngine.MODEL_VRAM_REQS.get(model_name, 0)
+        # Update estimate label — uses the current platform's engine reqs.
+        req_vram = model_memory_reqs().get(model_name, 0)
         self.vram_estimates_label.setText(f"Estimated Checkpoint Size: ~{req_vram} GB")
 
     def _test_recording(self):

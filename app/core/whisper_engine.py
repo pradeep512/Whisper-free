@@ -413,8 +413,31 @@ class WhisperEngine:
 
 
 # ============================================================================
-# Platform-aware factory
+# Platform-aware factory + helpers
 # ============================================================================
+
+def get_engine_class():
+    """Return the WhisperEngine class for this platform (no instantiation)."""
+    if sys.platform == 'darwin':
+        from app.core.whisper_engine_mlx import WhisperEngineMLX
+        return WhisperEngineMLX
+    return WhisperEngine
+
+
+def valid_models() -> list:
+    """Whisper model names supported on this platform.
+
+    Use this to populate UI dropdowns so the choices match what the
+    actual engine can load (MLX on macOS doesn't have all the same
+    models as torch on Linux).
+    """
+    return list(get_engine_class().VALID_MODELS)
+
+
+def model_memory_reqs() -> dict:
+    """Per-model memory requirement table (GB) for this platform's engine."""
+    return dict(get_engine_class().MODEL_VRAM_REQS)
+
 
 def create_whisper_engine(model_name: str = "small", device: Optional[str] = None):
     """Build the right Whisper engine for this platform.

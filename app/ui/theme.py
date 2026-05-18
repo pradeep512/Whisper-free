@@ -44,24 +44,24 @@ RADIUS_L  = 12
 
 
 def system_accent() -> str:
-    """Return the app accent color.
+    """Return the app accent color — coral orange.
 
-    Set to macOS systemOrange (dark mode variant). To honor the user's
-    chosen macOS accent color (System Settings → Appearance → Accent),
-    bridge via pyobjc and read NSColor.controlAccentColor directly —
-    a Tier 2 enhancement.
+    Hue picked from user-supplied swatch. To honor the user's chosen
+    macOS accent color (System Settings → Appearance → Accent), bridge
+    via pyobjc and read NSColor.controlAccentColor directly — a Tier 2
+    enhancement.
     """
-    return "#ff9f0a"   # macOS systemOrange (dark mode)
+    return "#e88543"   # coral orange
 
 
 def selection_bg() -> str:
-    """Translucent accent for selected sidebar items, etc.
+    """Solid accent for selected sidebar items.
 
-    Mac convention: selected nav items get a subtle accent tint, not a
-    solid-color fill. Bright accent fills are reserved for actual buttons.
+    Per user preference: sidebar selection is the solid accent (white
+    text), not a translucent tint. Matches the look from earlier
+    iterations where the selected tab was a full-color pill.
     """
-    # Translucent systemOrange — same hue as system_accent(), ~24% alpha.
-    return "rgba(255, 159, 10, 60)"
+    return system_accent()
 
 
 def accent_hover() -> str:
@@ -135,7 +135,7 @@ def main_window_qss() -> str:
         }}
         QListWidget::item:selected {{
             background-color: {selection_bg()};
-            color: {TEXT};
+            color: white;
             font-weight: 600;
         }}
         QListWidget::item:hover:!selected {{

@@ -34,6 +34,7 @@ MLX_MODEL_REPOS: Dict[str, str] = {
     'base':           'mlx-community/whisper-base-mlx',
     'small':          'mlx-community/whisper-small-mlx',
     'medium':         'mlx-community/whisper-medium-mlx',
+    'large':          'mlx-community/whisper-large-v3-mlx',
     'large-v3-turbo': 'mlx-community/whisper-large-v3-turbo',
 }
 
@@ -61,6 +62,7 @@ class WhisperEngineMLX:
         'base':            0.7,
         'small':           1.2,
         'medium':          2.5,
+        'large':           5.5,
         'large-v3-turbo':  3.2,
     }
 
