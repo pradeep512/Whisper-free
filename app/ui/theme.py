@@ -44,14 +44,14 @@ RADIUS_L  = 12
 
 
 def system_accent() -> str:
-    """Return Apple's signature dark-mode blue.
+    """Return the app accent color.
 
-    Hard-coded; Qt's NSColor controlAccentColor translation returns a
-    washed-out #314f78 variant. To honor the user's chosen accent
-    color (purple/pink/etc.), bridge via pyobjc and read
-    NSColor.controlAccentColor directly — a Tier 2 enhancement.
+    Set to macOS systemOrange (dark mode variant). To honor the user's
+    chosen macOS accent color (System Settings → Appearance → Accent),
+    bridge via pyobjc and read NSColor.controlAccentColor directly —
+    a Tier 2 enhancement.
     """
-    return "#0a84ff"
+    return "#ff9f0a"   # macOS systemOrange (dark mode)
 
 
 def selection_bg() -> str:
@@ -60,8 +60,8 @@ def selection_bg() -> str:
     Mac convention: selected nav items get a subtle accent tint, not a
     solid-color fill. Bright accent fills are reserved for actual buttons.
     """
-    # rgba notation works in QSS.
-    return "rgba(10, 132, 255, 60)"
+    # Translucent systemOrange — same hue as system_accent(), ~24% alpha.
+    return "rgba(255, 159, 10, 60)"
 
 
 def accent_hover() -> str:
