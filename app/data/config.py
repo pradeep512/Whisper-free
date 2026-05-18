@@ -87,7 +87,10 @@ class ConfigManager:
     }
 
     # Valid values for validation
-    VALID_MODELS = ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
+    # Superset of model names accepted across all engines (torch + MLX).
+    # The actual engine on this platform may support a subset; see
+    # whisper_engine.valid_models() for the runtime-correct list.
+    VALID_MODELS = ['tiny', 'base', 'small', 'medium', 'large', 'large-v3-turbo']
     VALID_POSITIONS = ['top-center', 'top-left', 'top-right', 'bottom-center', 'bottom-left', 'bottom-right']
 
     def __init__(self, config_path: Optional[str] = None):

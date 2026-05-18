@@ -56,14 +56,16 @@ class WhisperEngineMLX:
     VALID_MODELS = list(MLX_MODEL_REPOS.keys())
 
     # Approximate memory footprint per model in GB (unified memory).
-    # MLX is more compact than the PyTorch checkpoints.
+    # Numbers verified against MLX-format checkpoint sizes on HF — MLX
+    # models are more compact than PyTorch's because they're stored at
+    # the precision MLX expects (no upcasting).
     MODEL_VRAM_REQS = {
         'tiny':            0.4,
         'base':            0.7,
         'small':           1.2,
-        'medium':          2.5,
-        'large':           5.5,
-        'large-v3-turbo':  3.2,
+        'medium':          1.5,
+        'large':           3.0,
+        'large-v3-turbo':  1.6,
     }
 
     def __init__(self, model_name: str = "small", device: str = "mlx"):
