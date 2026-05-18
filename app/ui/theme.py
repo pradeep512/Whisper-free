@@ -352,7 +352,7 @@ def combo_qss() -> str:
             border-radius: {RADIUS_S}px;
             padding: 5px 10px;
             color: {TEXT};
-            min-width: 180px;
+            min-width: 120px;
             font-size: 13px;
         }}
         QComboBox:hover {{ border-color: {system_accent()}; }}
@@ -428,11 +428,10 @@ def group_qss() -> str:
             background-color: {BG_ELEVATED};
             border: 1px solid {SEPARATOR};
             border-radius: {RADIUS_L}px;
-            /* margin-top makes room for the title above the border;
-               the larger top padding inside the box gives the title
-               breathing room from the content below it. */
-            margin-top: 18px;
-            padding: 22px 14px 14px 14px;
+            /* Compact padding so cards fit comfortably in the 880-px
+               default window (two-column grids leave ~330 px per card). */
+            margin-top: 16px;
+            padding: 18px 12px 12px 12px;
             font-weight: 600;
             color: {TEXT};
             font-size: 13px;
@@ -440,7 +439,7 @@ def group_qss() -> str:
         QGroupBox::title {{
             subcontrol-origin: margin;
             subcontrol-position: top left;
-            left: 14px;        /* align with the inner content padding */
+            left: 12px;        /* align with the inner content padding */
             padding: 0 6px;
             background: transparent;
             color: {TEXT};

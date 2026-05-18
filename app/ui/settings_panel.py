@@ -73,32 +73,24 @@ class SettingsPanel(QWidget):
         from app.ui.theme import TEXT
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)   # generous gap between the title and the first card
+        # Tighter outer margins so the 2-column grid fits comfortably in
+        # the 880-px default window (sidebar takes 150 px, leaving ~730).
+        layout.setContentsMargins(14, 16, 14, 14)
+        layout.setSpacing(16)
 
         # Header
         header_label = QLabel("Settings")
         header_label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT};")
         layout.addWidget(header_label)
 
-        # Scrollable area for settings
+        # Scrollable area for settings — vertical only, never horizontal.
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll.setStyleSheet("""
-            QScrollArea { background-color: transparent; border: none; }
-            QScrollBar:vertical {
-                background: #2d2d2d;
-                width: 10px;
-                margin: 0px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #4d4d4d;
-                min-height: 20px;
-                border-radius: 5px;
-            }
-        """)
+        self.scroll.setStyleSheet(
+            "QScrollArea { background-color: transparent; border: none; }"
+        )
 
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background-color: transparent;")
@@ -156,7 +148,7 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
+        form.setSpacing(8)
         form.setContentsMargins(0, 0, 0, 0)
 
         # Get available memory (VRAM on Linux/NVIDIA, unified on Apple Silicon)
@@ -242,7 +234,7 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
+        form.setSpacing(8)
         form.setContentsMargins(0, 0, 0, 0)
 
         # Device selector
@@ -264,7 +256,7 @@ class SettingsPanel(QWidget):
         form.addRow("Device:", device_combo)
 
         # Test button
-        test_btn = QPushButton("Test Recording (2s)")
+        test_btn = QPushButton("Test Mic")
         test_btn.clicked.connect(self._test_recording)
         test_btn.setStyleSheet(self._button_style())
         form.addRow("", test_btn)
@@ -289,7 +281,7 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
+        form.setSpacing(8)
         form.setContentsMargins(0, 0, 0, 0)
 
         # Primary hotkey
@@ -338,7 +330,7 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
+        form.setSpacing(8)
         form.setContentsMargins(0, 0, 0, 0)
 
         # Enabled checkbox
@@ -394,7 +386,7 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
+        form.setSpacing(8)
         form.setContentsMargins(0, 0, 0, 0)
 
         # Open at Login — uses SMAppService (macOS 13+).
@@ -464,7 +456,7 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
+        form.setSpacing(8)
         form.setContentsMargins(0, 0, 0, 0)
 
         # fp16 checkbox. On macOS the MLX backend manages precision internally,
