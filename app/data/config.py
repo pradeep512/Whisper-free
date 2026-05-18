@@ -59,7 +59,10 @@ class ConfigManager:
             'font_size': 14,
         },
         'storage': {
-            'database_path': '~/.config/whisper-free/history.db',
+            # database_path key intentionally omitted — the actual DB path is
+            # resolved per-platform by app.platform.paths.database_file()
+            # (~/.config/whisper-free/ on Linux,
+            #  ~/Library/Application Support/Whisper-Free/ on macOS).
             'retention_days': 30,
             'save_audio_files': False,
         },
@@ -76,22 +79,35 @@ class ConfigManager:
                 'tsv': False,
             },
         },
+        # macOS-specific preferences. Read only on darwin; harmless on Linux.
+        'macos': {
+            'show_in_dock': False,    # False = menu-bar agent (default)
+            'open_at_login': False,
+        },
     }
 
     # Valid values for validation
-    VALID_MODELS = ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
+    # Superset of model names accepted across all engines (torch + MLX).
+    # The actual engine on this platform may support a subset; see
+    # whisper_engine.valid_models() for the runtime-correct list.
+    VALID_MODELS = ['tiny', 'base', 'small', 'medium', 'large', 'large-v3-turbo']
     VALID_POSITIONS = ['top-center', 'top-left', 'top-right', 'bottom-center', 'bottom-left', 'bottom-right']
 
-    def __init__(self, config_path: str = "~/.config/whisper-free/config.yaml"):
+    def __init__(self, config_path: Optional[str] = None):
         """
         Initialize configuration manager.
 
         Args:
-            config_path: Path to YAML config file
+            config_path: Path to YAML config file. If None, uses the
+                         platform-default location from app.platform.paths.
 
         Loads existing config or creates default if missing.
         """
-        self.config_path = Path(config_path).expanduser()
+        if config_path is None:
+            from app.platform import paths
+            self.config_path = paths.config_file()
+        else:
+            self.config_path = Path(config_path).expanduser()
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Initializing config at {self.config_path}")

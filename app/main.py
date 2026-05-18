@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from PySide6.QtCore import QThread, QTimer, Signal, QObject, Qt
 
 # Core components
-from app.core.whisper_engine import WhisperEngine
+from app.core.whisper_engine import WhisperEngine, create_whisper_engine
 from app.core.audio_capture import AudioRecorder
 from app.core.hotkey_manager import HotkeyManager
 from app.core.state_machine import StateMachine, ApplicationState
@@ -37,6 +37,48 @@ from app.ui.main_window import MainWindow
 # Data components
 from app.data.database import DatabaseManager
 from app.data.config import ConfigManager
+
+# Platform-specific paths and initialization hooks
+from app.platform import paths as platform_paths
+from app.platform import apply_early_config, platform_init
+
+
+# Rough download sizes (MB) of MLX-format Whisper models on HuggingFace.
+# Used by the first-launch progress dialog to set expectations.
+_MODEL_DOWNLOAD_MB = {
+    'tiny':           75,
+    'base':           145,
+    'small':          470,
+    'medium':         1500,
+    'large':          3000,
+    'large-v3-turbo': 1600,
+}
+
+
+def _estimate_model_mb(model_name: str) -> int:
+    return _MODEL_DOWNLOAD_MB.get(model_name, 500)
+
+
+def _is_model_cached(model_name: str) -> bool:
+    """True if the MLX model for `model_name` is already in our HF cache.
+
+    HuggingFace caches under HF_HOME/hub/models--<org>--<repo>/snapshots/.
+    We only check that the snapshots dir exists and is non-empty — good
+    enough to decide whether to show the "downloading…" dialog.
+    """
+    if sys.platform != 'darwin':
+        return False
+    try:
+        from app.core.whisper_engine_mlx import MLX_MODEL_REPOS
+        repo = MLX_MODEL_REPOS.get(model_name)
+        if not repo:
+            return False
+        from app.platform import paths
+        cache_root = paths.models_dir() / "huggingface" / "hub"
+        snapshots = cache_root / f"models--{repo.replace('/', '--')}" / "snapshots"
+        return snapshots.is_dir() and any(snapshots.iterdir())
+    except Exception:
+        return False
 
 
 # Setup logging
@@ -181,14 +223,28 @@ class WhisperFreeApp(QObject):
         self._exit_requested = False
         self.app.aboutToQuit.connect(self.cleanup)
 
-        # Configuration directory
-        self.config_dir = Path.home() / ".config" / "whisper-free"
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        # Configuration directory (platform-aware: ~/.config/whisper-free on
+        # Linux, ~/Library/Application Support/Whisper-Free on macOS)
+        self.config_dir = platform_paths.config_dir()
+        logger.info(f"Config directory: {self.config_dir}")
 
-        # Initialize data layer
+        # First-launch detection — check BEFORE ConfigManager auto-creates
+        # the config file. Used by run() to decide whether to show the
+        # onboarding wizard.
+        self._is_first_launch = not platform_paths.config_file().exists()
+        if self._is_first_launch:
+            logger.info("First launch detected (no config file present)")
+
+        # Initialize data layer (each manager reads its default path from
+        # app.platform.paths when constructed with no path argument)
         logger.info("Initializing configuration and database...")
-        self.config = ConfigManager(str(self.config_dir / "config.yaml"))
-        self.db = DatabaseManager(str(self.config_dir / "history.db"))
+        self.config = ConfigManager()
+        self.db = DatabaseManager()
+
+        # Apply per-platform config tweaks (e.g. upgrade Linux hotkey
+        # defaults to Mac-appropriate ones) BEFORE core components read
+        # the config. This is platform_init's "early" sibling.
+        apply_early_config(self.config)
 
         # Initialize core components
         logger.info("Initializing core components...")
@@ -218,6 +274,11 @@ class WhisperFreeApp(QObject):
         self.last_transcript = ""
         self.last_audio_data = None
 
+        # Apply platform-specific initialization (no-op on Linux; on macOS,
+        # later phases register the menu bar tray icon, set NSApp activation
+        # policy, and apply overlay collection behavior here)
+        platform_init(self)
+
         logger.info("Whisper-Free initialized successfully")
 
     def _init_core_components(self):
@@ -226,24 +287,64 @@ class WhisperFreeApp(QObject):
         # State machine
         self.state = StateMachine()
 
-        # Whisper engine
+        # Whisper engine — platform-aware factory:
+        # macOS (Apple Silicon) -> WhisperEngineMLX (mlx-whisper)
+        # Linux / other         -> WhisperEngine (torch + openai-whisper)
         try:
             model_name = self.config.get('whisper.model', 'small')
+            # 'device' is only meaningful on Linux. On macOS the factory ignores
+            # it. Keep the default 'cuda' so existing Linux configs keep working.
             device = self.config.get('whisper.device', 'cuda')
-            logger.info(f"Loading Whisper model: {model_name} on {device}")
+            logger.info(f"Loading Whisper model: {model_name} (device hint: {device})")
 
-            self.whisper = WhisperEngine(
-                model_name=model_name,
-                device=device
+            # Only show the "downloading…" dialog on the actual first
+            # launch for this model — when the model is already cached,
+            # the load takes ~1 s and a dialog would just flash uselessly.
+            # We also discovered that the modal dialog can leave residual
+            # state that crashes pynput's CGEventTap setup later, so
+            # skipping it on cached launches is doubly important.
+            init_progress = None
+            if not _is_model_cached(model_name):
+                init_progress = QProgressDialog(
+                    f"Downloading Whisper model '{model_name}'…\n"
+                    f"~{_estimate_model_mb(model_name)} MB from HuggingFace. "
+                    f"This is a one-time download.",
+                    None, 0, 0, None,
+                )
+                init_progress.setWindowTitle("Whisper-Free")
+                # Non-modal: we don't want this dialog to interfere with
+                # the pynput CGEventTap that gets installed later.
+                init_progress.setWindowModality(Qt.NonModal)
+                init_progress.setCancelButton(None)
+                init_progress.setMinimumWidth(380)
+                init_progress.show()
+                self.app.processEvents()
+
+            try:
+                self.whisper = create_whisper_engine(
+                    model_name=model_name,
+                    device=device,
+                )
+            finally:
+                if init_progress is not None:
+                    init_progress.close()
+                    init_progress.deleteLater()
+                    self.app.processEvents()
+
+            logger.info(
+                f"Whisper engine ready: {self.whisper!r} "
+                f"(memory: {self.whisper.get_vram_usage():.1f} MB)"
             )
-            logger.info(f"Whisper model loaded. VRAM: {self.whisper.get_vram_usage():.1f} MB")
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             QMessageBox.critical(
                 None,
                 "Whisper Engine Error",
                 f"Failed to load Whisper model.\n\n{str(e)}\n\n"
-                "Please check that CUDA is available or set device='cpu' in config."
+                "On Linux: check that CUDA is available or set "
+                "whisper.device='cpu' in config.\n"
+                "On macOS: ensure you're on Apple Silicon (M1+) and that "
+                "mlx-whisper is installed."
             )
             sys.exit(1)
 
@@ -378,6 +479,12 @@ class WhisperFreeApp(QObject):
 
         # Settings panel → Model change
         self.main_window.settings_panel.model_changed.connect(self.on_model_changed)
+
+        # Settings panel → Re-run onboarding wizard (macOS only; no-op signal
+        # on Linux because the button isn't created there)
+        self.main_window.settings_panel.rerun_setup_requested.connect(
+            self.show_onboarding_wizard
+        )
 
         # History panel → Text copied
         self.main_window.history_panel.text_copied.connect(self.on_text_copied)
@@ -692,12 +799,36 @@ class WhisperFreeApp(QObject):
         # Reload config (already saved by SettingsPanel)
         # Update components as needed
 
-        # Update hotkey if changed
+        # Update hotkey if changed.
+        # On macOS, recreating a pynput.GlobalHotKeys (CGEventTap under the hood)
+        # from a running Qt event loop hits a Quartz state mismatch that
+        # aborts the process with SIGTRAP. Skip the live reload — the user
+        # gets a "restart required" message and the new hotkey takes effect
+        # on next launch (it's already persisted by SettingsPanel.save_settings).
         new_hotkey = self.config.get('hotkey.primary', '<ctrl>+<space>')
-        if self.hotkey.change_hotkey(new_hotkey):
-            logger.info(f"Hotkey changed to: {new_hotkey}")
+        current_hotkey = self.hotkey.get_current_hotkey() if hasattr(self.hotkey, 'get_current_hotkey') else None
+        if sys.platform == 'darwin':
+            # Normalize so '<cmd>+<shift>+<space>' compares equal to 'cmd+shift+space'.
+            normalized_new = new_hotkey.replace('<', '').replace('>', '')
+            normalized_cur = (current_hotkey or '').replace('<', '').replace('>', '')
+            if normalized_new and normalized_new != normalized_cur:
+                logger.info(
+                    f"macOS: hotkey changed in settings ({current_hotkey} -> {new_hotkey}); "
+                    "live reload skipped to avoid Quartz CGEventTap crash. "
+                    "New hotkey takes effect on next launch."
+                )
+                QMessageBox.information(
+                    self.main_window,
+                    "Restart required",
+                    "The hotkey has been saved but won't take effect until "
+                    "you restart Whisper-Free.\n\n"
+                    "Quit from the menu bar icon and re-launch the app."
+                )
         else:
-            logger.error(f"Failed to change hotkey to: {new_hotkey}")
+            if self.hotkey.change_hotkey(new_hotkey):
+                logger.info(f"Hotkey changed to: {new_hotkey}")
+            else:
+                logger.error(f"Failed to change hotkey to: {new_hotkey}")
 
         # Update audio device if changed
         new_device = self.config.get('audio.device', None)
@@ -804,9 +935,38 @@ class WhisperFreeApp(QObject):
         if job_id.startswith('ptt_'):
             self.on_transcription_error(error_message)
 
+    def show_onboarding_wizard(self) -> None:
+        """Show the first-launch onboarding wizard (idempotent).
+
+        Public so the Settings panel "Re-run setup…" button can invoke it.
+        On Linux this is a no-op.
+        """
+        try:
+            from app.ui.onboarding_wizard import OnboardingWizard, should_show_on_launch
+        except Exception as e:
+            logger.error(f"Could not import onboarding wizard: {e}")
+            return
+
+        if not should_show_on_launch():
+            logger.debug("Onboarding wizard not applicable on this platform")
+            return
+
+        try:
+            wiz = OnboardingWizard(parent=self.main_window)
+            wiz.exec()
+        except Exception as e:
+            logger.error(f"Onboarding wizard failed: {e}")
+
     def run(self):
         """Start the application"""
         logger.info("Starting Whisper-Free...")
+
+        # First-launch onboarding wizard (macOS only). Runs BEFORE the hotkey
+        # listener starts so the user can grant Accessibility permission
+        # before pynput attempts the global key grab.
+        if sys.platform == 'darwin' and getattr(self, '_is_first_launch', False):
+            logger.info("Showing onboarding wizard (first launch)")
+            self.show_onboarding_wizard()
 
         # Start IPC server (Wayland hotkey support)
         if self.ipc_server.start():
@@ -820,8 +980,14 @@ class WhisperFreeApp(QObject):
         logger.info("Hotkey listener started")
 
         # Show main window
-        self.main_window.show()
-        logger.info("Main window shown")
+        # On macOS we run as a menu-bar agent (LSUIElement=true); the tray
+        # icon installed in init_macos() is the primary entry point. The user
+        # opens the main window on demand via the tray's "Open Window…" item.
+        if sys.platform == 'darwin':
+            logger.info("macOS: main window hidden; menu bar tray is the entry point")
+        else:
+            self.main_window.show()
+            logger.info("Main window shown")
 
         # Show overlay in hidden mode initially (will appear on hotkey)
         if self.config.get('overlay.enabled', True):
@@ -942,8 +1108,53 @@ class WhisperFreeApp(QObject):
         self.app.quit()
 
 
+def _handle_ipc_toggle_and_exit() -> int:
+    """Short-circuit launch mode used by `scripts/whisper-free --toggle`.
+
+    Sends a 'toggle' IPC command to the running Whisper-Free instance and
+    exits. Does NOT construct the full app / UI / engine — keeps invocation
+    cheap (~50ms vs ~5s for cold launch with model load).
+
+    Returns:
+        0 if the toggle was delivered, 1 if no running instance was found.
+    """
+    # Construct a minimal QCoreApplication so QLocalSocket can use the Qt
+    # event loop. We don't need full QApplication (no widgets).
+    from PySide6.QtCore import QCoreApplication
+    from app.core.ipc_server import send_ipc_command
+
+    _ = QCoreApplication(sys.argv)
+    if send_ipc_command('toggle'):
+        return 0
+    print('Whisper-Free is not running.', file=sys.stderr)
+    return 1
+
+
 def main():
-    """Main entry point"""
+    """Main entry point.
+
+    Special invocation modes (checked before constructing WhisperFreeApp):
+        --ipc-toggle: send 'toggle' to the running instance and exit.
+                      Used by the CLI shim scripts/whisper-free.
+
+    Default: launch the full app.
+    """
+    # CRITICAL for PyInstaller-frozen apps on macOS: when our transitive
+    # deps (huggingface_hub parallel downloads, joblib via librosa, etc.)
+    # use multiprocessing, the default 'spawn' start method re-executes
+    # the bundled binary for each child process. Without freeze_support(),
+    # each child re-runs WhisperFreeApp.__init__ (re-loads the model,
+    # re-registers the menu bar tray, …) and spawns its own children,
+    # cascading into an OOM fork bomb within seconds.
+    # freeze_support() short-circuits child processes so they execute
+    # only their multiprocessing duties and exit. It's a no-op when
+    # running from source.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
+    if '--ipc-toggle' in sys.argv:
+        sys.exit(_handle_ipc_toggle_and_exit())
+
     try:
         app = WhisperFreeApp()
         sys.exit(app.run())

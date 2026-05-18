@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# CLI shim for Whisper-Free on macOS.
+#
+# Installed to /opt/homebrew/bin/whisper-free (or /usr/local/bin on Intel)
+# by the Homebrew Cask formula. Power users can also call this directly
+# from Raycast / Alfred / Keyboard Maestro to toggle recording without
+# needing to lift hands off the keyboard.
+#
+# Usage:
+#   whisper-free            # launch the app (or focus the running instance)
+#   whisper-free --toggle   # toggle PTT recording (no-op if app not running)
+
+set -euo pipefail
+
+# Locate the .app bundle. Check standard install locations.
+APP_DIR=""
+for candidate in \
+    "/Applications/Whisper-Free.app" \
+    "$HOME/Applications/Whisper-Free.app" \
+    "/opt/homebrew/Caskroom/whisper-free/latest/Whisper-Free.app"
+do
+    if [ -d "$candidate" ]; then
+        APP_DIR="$candidate"
+        break
+    fi
+done
+
+if [ -z "$APP_DIR" ]; then
+    echo "Error: Whisper-Free.app not found in any of:" >&2
+    echo "  /Applications/Whisper-Free.app" >&2
+    echo "  $HOME/Applications/Whisper-Free.app" >&2
+    echo "" >&2
+    echo "Install with: brew install --cask whisper-free" >&2
+    echo "  or drag Whisper-Free.app to /Applications from the DMG" >&2
+    exit 1
+fi
+
+EXEC="$APP_DIR/Contents/MacOS/Whisper-Free"
+
+# --toggle: send IPC command to the running instance. The binary recognizes
+# --ipc-toggle as a short-lived mode that connects to the QLocalSocket
+# and exits, rather than launching the full UI.
+if [ "${1:-}" = "--toggle" ]; then
+    exec "$EXEC" --ipc-toggle
+fi
+
+# Default: launch the .app (reuses running instance via Launch Services).
+exec open -a "$APP_DIR" --args "$@"

@@ -20,6 +20,12 @@ from app.ui.history_panel import HistoryPanel
 from app.ui.settings_panel import SettingsPanel
 from app.ui.file_transcribe_panel import FileTranscribePanel
 from app.ui.batch_transcribe_panel import BatchTranscribePanel
+from app.ui.theme import (
+    BG, BG_ELEVATED, BG_HOVER, BG_PRESSED, SEPARATOR,
+    TEXT, TEXT_MUTED, SUCCESS, WARNING, DANGER,
+    RADIUS_M, system_accent, accent_hover, accent_pressed,
+    main_window_qss, record_button_qss,
+)
 from app.core.state_machine import ApplicationState
 
 logger = logging.getLogger(__name__)
@@ -65,18 +71,22 @@ class MainWindow(QMainWindow):
         self.ptt_button = None
 
         self.setWindowTitle("Whisper-Free")
-        self.setWindowTitle("Whisper-Free")
-        self.setFixedSize(800, 600)
-        
-        # Disable maximize button, keep close and minimize
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.CustomizeWindowHint |
-            Qt.WindowType.WindowTitleHint |
-            Qt.WindowType.WindowSystemMenuHint |
-            Qt.WindowType.WindowMinimizeButtonHint |
-            Qt.WindowType.WindowCloseButtonHint
-        )
+        # Mac convention: allow window resizing with a sensible minimum.
+        # Linux retains the slightly-larger default.
+        import sys as _sys
+        if _sys.platform == 'darwin':
+            self.resize(880, 600)
+            self.setMinimumSize(720, 480)
+        else:
+            self.setFixedSize(800, 600)
+            self.setWindowFlags(
+                Qt.WindowType.Window |
+                Qt.WindowType.CustomizeWindowHint |
+                Qt.WindowType.WindowTitleHint |
+                Qt.WindowType.WindowSystemMenuHint |
+                Qt.WindowType.WindowMinimizeButtonHint |
+                Qt.WindowType.WindowCloseButtonHint
+            )
 
         self._setup_ui()
         self._apply_theme()
@@ -141,7 +151,7 @@ class MainWindow(QMainWindow):
         self.sidebar.clear()
 
         # Top items
-        for text in ["History", "File Transcribe", "Batch Files", "Settings"]:
+        for text in ["History", "Transcribe", "Batch Files", "Settings"]:
             item = QListWidgetItem(text)
             item.setSizeHint(QSize(140, 45))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -169,7 +179,7 @@ class MainWindow(QMainWindow):
         else:
             # Create placeholder if engine not available
             self.file_transcribe_panel = self._create_placeholder_panel(
-                "File Transcribe",
+                "Transcribe",
                 "File transcription requires WhisperEngine.\nPlease restart the application."
             )
 
@@ -219,15 +229,16 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(12)
 
         # App name
         title = QLabel("Whisper-Free")
-        title.setStyleSheet("font-size: 32px; font-weight: bold; color: #ffffff;")
+        title.setStyleSheet(f"font-size: 28px; font-weight: 700; color: {TEXT};")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Version
         version = QLabel("Version 1.0.0")
-        version.setStyleSheet("font-size: 16px; color: #888888; margin-top: 8px;")
+        version.setStyleSheet(f"font-size: 14px; color: {TEXT_MUTED};")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Description
@@ -237,15 +248,18 @@ class MainWindow(QMainWindow):
             "Press your hotkey to start recording,\n"
             "speak naturally, and get instant transcription."
         )
-        description.setStyleSheet("font-size: 14px; color: #cccccc; margin-top: 16px;")
+        description.setStyleSheet(
+            f"font-size: 13px; color: {TEXT_MUTED}; margin-top: 12px; line-height: 150%;"
+        )
         description.setAlignment(Qt.AlignmentFlag.AlignCenter)
         description.setWordWrap(True)
 
         # License
         license_label = QLabel("MIT License")
-        license_label.setStyleSheet("font-size: 12px; color: #666666; margin-top: 24px;")
+        license_label.setStyleSheet(f"font-size: 11px; color: {TEXT_MUTED}; margin-top: 16px;")
         license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        layout.addStretch()
         layout.addWidget(title)
         layout.addWidget(version)
         layout.addWidget(description)
@@ -259,16 +273,18 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(8)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        title_label.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {TEXT};")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         message_label = QLabel(message)
-        message_label.setStyleSheet("font-size: 14px; color: #888888;")
+        message_label.setStyleSheet(f"font-size: 13px; color: {TEXT_MUTED};")
         message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         message_label.setWordWrap(True)
 
+        layout.addStretch()
         layout.addWidget(title_label)
         layout.addWidget(message_label)
         layout.addStretch()
@@ -280,45 +296,35 @@ class MainWindow(QMainWindow):
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
 
-        # PTT toggle button (Wayland-safe)
-        self.ptt_button = QPushButton("Start Recording")
-        self.ptt_button.setFixedHeight(28)
+        # PTT toggle button — neutral when idle, red (universal "stop"
+        # signal) when recording. Style is swapped live in update_ptt_button.
+        self.ptt_button = QPushButton("Record")
+        self.ptt_button.setFixedHeight(24)
         self.ptt_button.clicked.connect(self.ptt_toggle_requested.emit)
-        self.ptt_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1f3b2c;
-                border: 1px solid #2d5a3f;
-                border-radius: 6px;
-                padding: 4px 12px;
-                font-size: 12px;
-                font-weight: bold;
-                color: #e6ffe6;
-            }
-            QPushButton:hover {
-                background-color: #254a36;
-            }
-            QPushButton:pressed {
-                background-color: #1b3326;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a2a;
-                border: 1px solid #3a3a3a;
-                color: #777777;
-            }
-        """)
+        self.ptt_button.setStyleSheet(record_button_qss(state="idle"))
 
         # Status label
         self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet("color: #00ff00; font-weight: bold;")
+        self.status_label.setStyleSheet(
+            f"color: {SUCCESS}; font-weight: 600; font-size: 12px;"
+        )
 
         # Model label
         model_name = self.config.get('whisper.model', 'small')
         self.model_label = QLabel(f"Model: {model_name}")
-        self.model_label.setStyleSheet("color: #cccccc; margin-left: 16px;")
+        self.model_label.setStyleSheet(
+            f"color: {TEXT_MUTED}; margin-left: 12px; font-size: 12px;"
+        )
 
         # VRAM label
-        self.vram_label = QLabel("VRAM: N/A")
-        self.vram_label.setStyleSheet("color: #cccccc; margin-left: 16px;")
+        # Reuses the same widget on macOS, but with a friendlier label below.
+        import sys as _sys
+        vram_prefix = "Memory" if _sys.platform == 'darwin' else "VRAM"
+        self.vram_label = QLabel(f"{vram_prefix}: —")
+        self.vram_label.setStyleSheet(
+            f"color: {TEXT_MUTED}; margin-left: 12px; font-size: 12px;"
+        )
+        self._vram_prefix = vram_prefix
 
         # Add to status bar
         # Use permanent widgets for Right-aligned system info to avoid overlap
@@ -341,24 +347,26 @@ class MainWindow(QMainWindow):
         status_bar.addPermanentWidget(stats_widget)
 
     def update_ptt_button(self, state: ApplicationState) -> None:
-        """Update PTT button label and enabled state based on app state."""
+        """Update PTT button label, style, and enabled state based on app state.
+
+        - IDLE / COMPLETED / ERROR → neutral "Record"
+        - RECORDING                → red filled "Stop"
+        - PROCESSING               → disabled neutral "Processing…"
+        """
         if self.ptt_button is None:
             return
 
-        if state == ApplicationState.IDLE:
-            self.ptt_button.setText("Start Recording")
-            self.ptt_button.setEnabled(True)
-        elif state == ApplicationState.RECORDING:
-            self.ptt_button.setText("Stop Recording")
+        if state == ApplicationState.RECORDING:
+            self.ptt_button.setText("Stop")
+            self.ptt_button.setStyleSheet(record_button_qss(state="recording"))
             self.ptt_button.setEnabled(True)
         elif state == ApplicationState.PROCESSING:
-            self.ptt_button.setText("Processing...")
+            self.ptt_button.setText("Processing…")
+            self.ptt_button.setStyleSheet(record_button_qss(state="idle"))
             self.ptt_button.setEnabled(False)
-        elif state == ApplicationState.COMPLETED:
-            self.ptt_button.setText("Start Recording")
-            self.ptt_button.setEnabled(True)
-        elif state == ApplicationState.ERROR:
-            self.ptt_button.setText("Start Recording")
+        else:  # IDLE / COMPLETED / ERROR
+            self.ptt_button.setText("Record")
+            self.ptt_button.setStyleSheet(record_button_qss(state="idle"))
             self.ptt_button.setEnabled(True)
 
     def _on_sidebar_changed(self, row: int):
@@ -440,41 +448,39 @@ class MainWindow(QMainWindow):
             logger.error(f"Error handling file transcription completion: {e}")
 
     def update_status(self, message: str):
-        """
-        Update status bar message
-
-        Args:
-            message: Status message (e.g., "Ready", "Recording", "Processing")
-        """
-        # Color-code by status
+        """Update status bar message with macOS-appropriate color coding."""
         color_map = {
-            "Ready": "#00ff00",
-            "Recording": "#ff9900",
-            "Processing": "#ffff00",
-            "Error": "#ff0000"
+            "Ready":      SUCCESS,
+            "Recording":  WARNING,
+            "Processing": WARNING,
+            "Completed":  SUCCESS,
+            "Error":      DANGER,
         }
-
-        # Determine color
-        color = "#cccccc"  # Default
-        for key, value in color_map.items():
-                color = value
-                break
-
+        color = color_map.get(message, TEXT_MUTED)
         self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self.status_label.setStyleSheet(
+            f"color: {color}; font-weight: 600; font-size: 12px;"
+        )
 
     def update_vram_usage(self, usage_mb: float):
-        """
-        Update VRAM display in status bar
+        """Update memory display in status bar AND in the Settings panel.
 
-        Args:
-            usage_mb: VRAM usage in megabytes
+        On macOS the label says "Memory" (MLX uses unified memory, not VRAM).
+        On Linux it says "VRAM" (NVIDIA GPU memory).
         """
+        prefix = getattr(self, '_vram_prefix', 'Memory')
         if usage_mb >= 1024:
-            usage_gb = usage_mb / 1024
-            self.vram_label.setText(f"VRAM: {usage_gb:.2f} GB")
+            self.vram_label.setText(f"{prefix}: {usage_mb / 1024:.2f} GB")
         else:
-            self.vram_label.setText(f"VRAM: {usage_mb:.0f} MB")
+            self.vram_label.setText(f"{prefix}: {usage_mb:.0f} MB")
+
+        # Mirror to the Settings panel's live "Unified memory" / "Actual VRAM"
+        # row so the user can see the same number when opening Settings.
+        try:
+            if self.settings_panel is not None:
+                self.settings_panel.update_vram_usage(usage_mb)
+        except Exception:
+            pass
 
     def _load_history(self):
         """Load initial history from database"""
@@ -485,53 +491,5 @@ class MainWindow(QMainWindow):
             logger.error(f"Failed to load initial history: {e}")
 
     def _apply_theme(self):
-        """Apply dark theme QSS styling"""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1e1e1e;
-            }
-
-            QWidget {
-                background-color: #1e1e1e;
-                color: #ffffff;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                font-size: 14px;
-            }
-
-            QListWidget {
-                background-color: #2d2d2d;
-                border: none;
-                border-right: 1px solid #3d3d3d;
-                outline: none;
-            }
-
-            QListWidget::item {
-                padding: 12px;
-                margin: 4px 8px;
-                background-color: transparent;
-                border-radius: 6px;
-                color: #cccccc;
-            }
-
-            QListWidget::item:selected {
-                background-color: #0078d4;
-                color: #ffffff;
-                font-weight: bold;
-            }
-
-            QListWidget::item:hover:!selected {
-                background-color: #3d3d3d;
-            }
-
-            QStatusBar {
-                background-color: #252525;
-                border-top: 1px solid #3d3d3d;
-                color: #cccccc;
-                padding: 4px;
-            }
-
-            QStatusBar QLabel {
-                background-color: transparent;
-                padding: 2px 8px;
-            }
-        """)
+        """Apply the Mac-friendly dark theme. See app/ui/theme.py."""
+        self.setStyleSheet(main_window_qss())

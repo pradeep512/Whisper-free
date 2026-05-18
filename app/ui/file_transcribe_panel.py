@@ -76,17 +76,29 @@ class FileTranscribePanel(QWidget):
         self.queue_manager.job_failed.connect(self._on_job_failed)
 
     def _setup_ui(self):
-        """Create UI layout"""
+        """Create UI layout.
+
+        Top section: 2x2 grid of the four control cards.
+            ┌──────────────────┬──────────────────┐
+            │ Select Audio File│ Transcription    │
+            │                  │ Settings         │
+            ├──────────────────┼──────────────────┤
+            │ Output Formats   │ Transcribe       │
+            └──────────────────┴──────────────────┘
+        Below that, the Result panel spans full width.
+        """
+        from app.ui.theme import TEXT
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
 
         # Header
-        header = QLabel("File Transcribe")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        header = QLabel("Transcribe")
+        header.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT};")
         layout.addWidget(header)
 
-        # Scrollable area
+        # Scrollable area (some screens may be small)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -95,39 +107,56 @@ class FileTranscribePanel(QWidget):
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(16)
+        scroll_layout.setContentsMargins(0, 4, 0, 0)
         scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Add sections
-        scroll_layout.addWidget(self._create_file_selection_group())
-        scroll_layout.addWidget(self._create_settings_display_group())
-        scroll_layout.addWidget(self._create_output_format_group())
-        scroll_layout.addWidget(self._create_transcription_group())
+        # ----- 2x2 grid of the four control cards -----
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(16)
+        grid.addWidget(self._create_file_selection_group(),    0, 0)
+        grid.addWidget(self._create_settings_display_group(),  0, 1)
+        grid.addWidget(self._create_output_format_group(),     1, 0)
+        grid.addWidget(self._create_transcription_group(),     1, 1)
+        # Equal column widths
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        scroll_layout.addLayout(grid)
+
+        # ----- Full-width result card below -----
         scroll_layout.addWidget(self._create_results_group())
 
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll, 1)
 
     def _create_file_selection_group(self) -> QGroupBox:
-        """Create file selection section"""
+        """Create file selection section."""
+        from app.ui.theme import TEXT, TEXT_MUTED
+
         group = QGroupBox("Select Audio File")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(16, 24, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
-        # File info labels
+        # File path label
         self.file_label = QLabel("No file selected")
-        self.file_label.setStyleSheet("color: #888888; font-style: italic;")
+        self.file_label.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-style: italic; font-size: 12px;"
+        )
         self.file_label.setWordWrap(True)
         layout.addWidget(self.file_label)
 
+        # Duration label (filled in once a file is selected)
         self.duration_label = QLabel("")
-        self.duration_label.setStyleSheet("color: #cccccc;")
+        self.duration_label.setStyleSheet(f"color: {TEXT}; font-size: 12px;")
         layout.addWidget(self.duration_label)
 
+        layout.addStretch(1)   # push the button to the bottom
+
         # Browse button
-        self.browse_button = QPushButton("Browse...")
+        self.browse_button = QPushButton("Choose File…")
         self.browse_button.clicked.connect(self._on_browse_clicked)
         self.browse_button.setStyleSheet(self._button_style())
         layout.addWidget(self.browse_button)
@@ -135,96 +164,118 @@ class FileTranscribePanel(QWidget):
         return group
 
     def _create_settings_display_group(self) -> QGroupBox:
-        """Create settings display section (read-only)"""
+        """Create read-only settings display."""
+        from app.ui.theme import TEXT, TEXT_MUTED
+        import sys as _sys
+
         group = QGroupBox("Transcription Settings")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(16, 24, 16, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
-        # Model
-        model_name = self.config.get('whisper.model', 'small')
-        model_label = QLabel(f"Model: {model_name}")
-        model_label.setStyleSheet("color: #cccccc;")
-        layout.addWidget(model_label)
+        # Two-column "label : value" rows for clean alignment.
+        def _row(label_text: str, value_text: str) -> QHBoxLayout:
+            r = QHBoxLayout()
+            r.setSpacing(8)
+            k = QLabel(label_text)
+            k.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
+            k.setFixedWidth(80)
+            v = QLabel(value_text)
+            v.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 500;")
+            r.addWidget(k)
+            r.addWidget(v, 1)
+            return r
 
-        # Language
-        language = self.config.get('whisper.language')
-        lang_text = language if language else "Auto-detect"
-        lang_label = QLabel(f"Language: {lang_text}")
-        lang_label.setStyleSheet("color: #cccccc;")
-        layout.addWidget(lang_label)
+        layout.addLayout(_row("Model",    self.config.get('whisper.model', 'small')))
+        lang = self.config.get('whisper.language') or "Auto-detect"
+        layout.addLayout(_row("Language", lang))
+        # On macOS the device is always MLX; on Linux it's CUDA/CPU.
+        device_value = "Apple Silicon (MLX)" if _sys.platform == 'darwin' \
+            else self.config.get('whisper.device', 'cuda').upper()
+        layout.addLayout(_row("Device",   device_value))
 
-        # Device
-        device = self.config.get('whisper.device', 'cuda')
-        device_label = QLabel(f"Device: {device.upper()}")
-        device_label.setStyleSheet("color: #cccccc;")
-        layout.addWidget(device_label)
+        layout.addStretch(1)
 
-        # Info text
-        info = QLabel("Settings are configured in the Settings panel")
-        info.setStyleSheet("color: #666666; font-size: 12px; font-style: italic; margin-top: 8px;")
+        info = QLabel("Change these in the Settings tab.")
+        info.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: 11px; font-style: italic;"
+        )
         info.setWordWrap(True)
         layout.addWidget(info)
 
         return group
 
     def _create_output_format_group(self) -> QGroupBox:
-        """Create output format selection section"""
+        """Create output format selection section.
+
+        Uses ModernCheckBox (custom-painted, theme-aware) instead of the
+        default QCheckBox so the indicator stays consistent with the
+        app's orange accent and doesn't render with Qt's system-blue
+        macOS-native checkbox style.
+        """
+        from app.ui.theme import TEXT, TEXT_MUTED
+        from app.ui.widgets import ModernCheckBox
+
         group = QGroupBox("Output Formats")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(16, 24, 16, 16)
+        # Use group_qss's internal padding — don't double up on contentsMargins.
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # Info label
+        # Section helper text
         info_label = QLabel("Select which file formats to create:")
-        info_label.setStyleSheet("color: #cccccc;")
+        info_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         layout.addWidget(info_label)
 
-        # Format checkboxes in a grid
+        # Format checkboxes in a 2-column grid using our custom widget.
         checkbox_layout = QGridLayout()
-        checkbox_layout.setSpacing(8)
+        checkbox_layout.setHorizontalSpacing(24)
+        checkbox_layout.setVerticalSpacing(2)
 
-        # Create checkboxes for each format
         self.format_checkboxes = {}
 
         formats = [
-            ('txt', 'Plain Text (.txt)', 'Basic text transcription'),
-            ('srt', 'SRT Subtitles (.srt)', 'For video editing software'),
-            ('vtt', 'WebVTT (.vtt)', 'For web video players'),
-            ('json', 'JSON (.json)', 'Full data with timestamps'),
-            ('tsv', 'TSV (.tsv)', 'Tab-separated timestamps'),
+            ('txt',  'Plain Text (.txt)',     'Basic text transcription'),
+            ('srt',  'SRT Subtitles (.srt)',  'For video editing software'),
+            ('vtt',  'WebVTT (.vtt)',         'For web video players'),
+            ('json', 'JSON (.json)',          'Full data with timestamps'),
+            ('tsv',  'TSV (.tsv)',            'Tab-separated timestamps'),
         ]
 
         for i, (format_key, label, tooltip) in enumerate(formats):
-            checkbox = QCheckBox(label)
+            checkbox = ModernCheckBox(label)
             checkbox.setToolTip(tooltip)
-            checkbox.setStyleSheet("color: #ffffff;")
 
-            # Load initial state from config
-            enabled = self.config.get(f'file_transcribe.output_formats.{format_key}', format_key == 'txt')
+            enabled = self.config.get(
+                f'file_transcribe.output_formats.{format_key}',
+                format_key == 'txt',
+            )
             checkbox.setChecked(enabled)
-
-            # Connect signal to save config
             checkbox.stateChanged.connect(
                 lambda state, key=format_key: self._on_format_checkbox_changed(key, state)
             )
 
             self.format_checkboxes[format_key] = checkbox
+            checkbox_layout.addWidget(checkbox, i // 2, i % 2)
 
-            # Add to grid (2 columns)
-            row = i // 2
-            col = i % 2
-            checkbox_layout.addWidget(checkbox, row, col)
+        # Left-align both columns
+        checkbox_layout.setColumnStretch(0, 0)
+        checkbox_layout.setColumnStretch(1, 0)
+        checkbox_layout.setColumnStretch(2, 1)
 
         layout.addLayout(checkbox_layout)
 
-        # Note about text display
-        note = QLabel("Note: Only .txt content will be displayed below. Other formats will be created as files.")
-        note.setStyleSheet("color: #666666; font-size: 11px; font-style: italic; margin-top: 8px;")
+        # Footnote
+        note = QLabel(
+            "Note: only .txt content is displayed below; other formats are saved as files."
+        )
+        note.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: 11px; font-style: italic; margin-top: 4px;"
+        )
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -252,33 +303,40 @@ class FileTranscribePanel(QWidget):
             )
 
     def _create_transcription_group(self) -> QGroupBox:
-        """Create transcription control section"""
+        """Create transcription control card."""
+        from app.ui.theme import TEXT_MUTED
+
         group = QGroupBox("Transcribe")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(16, 24, 16, 16)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # Transcribe button
+        # Primary action — visible and prominent in the card.
         self.transcribe_button = QPushButton("Transcribe File")
         self.transcribe_button.clicked.connect(self._on_transcribe_clicked)
-        self.transcribe_button.setEnabled(False)  # Disabled until file selected
+        self.transcribe_button.setEnabled(False)  # disabled until a file is selected
         self.transcribe_button.setStyleSheet(self._primary_button_style())
         layout.addWidget(self.transcribe_button)
 
-        # Progress bar
+        # Progress bar (slim, accent fill — see theme.progress_qss)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(False)
         self.progress_bar.setStyleSheet(self._progress_bar_style())
         layout.addWidget(self.progress_bar)
 
-        # Status label
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #888888; font-style: italic;")
+        # Status line below the bar (e.g. "Loading audio…", "Saved 3 files")
+        self.status_label = QLabel("Pick a file to begin.")
+        self.status_label.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-style: italic; font-size: 12px;"
+        )
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
+
+        layout.addStretch(1)
 
         return group
 
@@ -812,114 +870,26 @@ class FileTranscribePanel(QWidget):
         return f"{mins}:{secs:02d}"
 
     # Stylesheet methods
+    # Style helpers — delegate to the central theme. See app/ui/theme.py.
     def _scroll_style(self) -> str:
-        return """
-            QScrollArea { background-color: transparent; border: none; }
-            QScrollBar:vertical {
-                background: #2d2d2d;
-                width: 10px;
-                margin: 0px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #4d4d4d;
-                min-height: 20px;
-                border-radius: 5px;
-            }
-        """
+        return "QScrollArea { background-color: transparent; border: none; }"
 
     def _group_style(self) -> str:
-        return """
-            QGroupBox {
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding: 12px;
-                font-weight: bold;
-                color: #ffffff;
-                background-color: #252525;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-            }
-        """
+        from app.ui.theme import group_qss
+        return group_qss()
 
     def _button_style(self) -> str:
-        return """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 8px 16px;
-                color: #ffffff;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                border-color: #4d4d4d;
-            }
-            QPushButton:pressed {
-                background-color: #4d4d4d;
-            }
-            QPushButton:disabled {
-                background-color: #1e1e1e;
-                color: #666666;
-                border-color: #2d2d2d;
-            }
-        """
+        from app.ui.theme import secondary_button_qss
+        return secondary_button_qss()
 
     def _primary_button_style(self) -> str:
-        return """
-            QPushButton {
-                background-color: #0078d4;
-                border: 1px solid #0078d4;
-                border-radius: 4px;
-                padding: 10px 24px;
-                color: #ffffff;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #005a9e;
-                border-color: #005a9e;
-            }
-            QPushButton:pressed {
-                background-color: #004578;
-            }
-            QPushButton:disabled {
-                background-color: #1e1e1e;
-                color: #666666;
-                border-color: #2d2d2d;
-            }
-        """
+        from app.ui.theme import primary_button_qss
+        return primary_button_qss()
 
     def _progress_bar_style(self) -> str:
-        return """
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                background-color: #2d2d2d;
-                text-align: center;
-                color: #ffffff;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d4;
-                border-radius: 3px;
-            }
-        """
+        from app.ui.theme import progress_qss
+        return progress_qss()
 
     def _text_edit_style(self) -> str:
-        return """
-            QTextEdit {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 8px;
-                color: #ffffff;
-                font-family: 'Courier New', monospace;
-                font-size: 13px;
-            }
-        """
+        from app.ui.theme import text_edit_qss
+        return text_edit_qss()

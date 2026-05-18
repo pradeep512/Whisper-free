@@ -16,10 +16,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, QEvent
 import logging
+import sys
 
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QColor, QBrush
 from app.core.audio_capture import AudioRecorder
-from app.core.whisper_engine import WhisperEngine
+from app.core.whisper_engine import (
+    WhisperEngine, valid_models, model_memory_reqs, get_engine_class,
+)
+from app.ui.widgets import ModernCheckBox
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,7 @@ class SettingsPanel(QWidget):
     # Signals
     settings_saved = Signal()  # Emitted when settings are saved
     model_changed = Signal(str)  # Emitted when Whisper model is changed
+    rerun_setup_requested = Signal()  # Emitted on darwin when user clicks "Re-run setup…"
 
     def __init__(self, config_manager):
         """
@@ -65,33 +70,27 @@ class SettingsPanel(QWidget):
         - Overlay
         - Advanced
         """
+        from app.ui.theme import TEXT
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        # Tighter outer margins so the 2-column grid fits comfortably in
+        # the 880-px default window (sidebar takes 150 px, leaving ~730).
+        layout.setContentsMargins(14, 16, 14, 14)
+        layout.setSpacing(16)
 
         # Header
         header_label = QLabel("Settings")
-        header_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        header_label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT};")
         layout.addWidget(header_label)
 
-        # Scrollable area for settings
+        # Scrollable area for settings — vertical only, never horizontal.
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll.setStyleSheet("""
-            QScrollArea { background-color: transparent; border: none; }
-            QScrollBar:vertical {
-                background: #2d2d2d;
-                width: 10px;
-                margin: 0px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #4d4d4d;
-                min-height: 20px;
-                border-radius: 5px;
-            }
-        """)
+        self.scroll.setStyleSheet(
+            "QScrollArea { background-color: transparent; border: none; }"
+        )
 
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background-color: transparent;")
@@ -106,8 +105,10 @@ class SettingsPanel(QWidget):
         self.setting_groups.append(self._create_audio_group())
         self.setting_groups.append(self._create_hotkey_group())
         self.setting_groups.append(self._create_overlay_group())
+        if sys.platform == 'darwin':
+            self.setting_groups.append(self._create_macos_group())
         self.setting_groups.append(self._create_advanced_group())
-        
+
         # Initial layout
         self._reflow_grid()
 
@@ -126,6 +127,15 @@ class SettingsPanel(QWidget):
         reset_btn.clicked.connect(self.reset_to_defaults)
         reset_btn.setStyleSheet(self._button_style())
 
+        # On macOS, expose a "Re-run setup…" button so the user can
+        # re-trigger the onboarding wizard if they skipped or denied
+        # permissions on first launch.
+        if sys.platform == 'darwin':
+            rerun_btn = QPushButton("Re-run setup…")
+            rerun_btn.clicked.connect(self.rerun_setup_requested.emit)
+            rerun_btn.setStyleSheet(self._button_style())
+            button_layout.addWidget(rerun_btn)
+
         button_layout.addStretch()
         button_layout.addWidget(reset_btn)
         button_layout.addWidget(save_btn)
@@ -138,21 +148,24 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
 
-        # Get available VRAM
-        available_vram = WhisperEngine.get_available_vram()
-        
-        # Model dropdown with VRAM validation
+        # Get available memory (VRAM on Linux/NVIDIA, unified on Apple Silicon)
+        available_vram = get_engine_class().get_available_vram()
+        memory_table = model_memory_reqs()
+
+        # Model dropdown — populated from the actual platform's engine so
+        # the choices match what can actually be loaded (MLX on macOS
+        # supports a slightly different set than torch on Linux).
         model_combo = QComboBox()
         self.widgets['whisper.model'] = model_combo
-        
+
         # Use StandardItemModel to support disabling items
         model_item_model = QStandardItemModel()
-        
-        for model_name in WhisperEngine.VALID_MODELS:
-            req_vram = WhisperEngine.MODEL_VRAM_REQS.get(model_name, 0)
+
+        for model_name in valid_models():
+            req_vram = memory_table.get(model_name, 0)
             item = QStandardItem(model_name)
             
             # Disable if insufficient VRAM (with 0.5 GB buffer)
@@ -205,11 +218,13 @@ class SettingsPanel(QWidget):
         self.vram_estimates_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
         form.addRow("", self.vram_estimates_label)
 
-        # Actual VRAM usage label (updated externally)
+        # Actual VRAM usage label (updated externally). On macOS, MLX uses
+        # unified memory; the label text reflects that.
         vram_label = QLabel("N/A")
         vram_label.setStyleSheet("color: #888888;")
         self.widgets['vram_label'] = vram_label
-        form.addRow("Actual VRAM:", vram_label)
+        vram_row_label = "Unified memory:" if sys.platform == 'darwin' else "Actual VRAM:"
+        form.addRow(vram_row_label, vram_label)
 
         return group
 
@@ -219,8 +234,8 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Device selector
         device_combo = QComboBox()
@@ -241,19 +256,19 @@ class SettingsPanel(QWidget):
         form.addRow("Device:", device_combo)
 
         # Test button
-        test_btn = QPushButton("Test Recording (2s)")
+        test_btn = QPushButton("Test Mic")
         test_btn.clicked.connect(self._test_recording)
         test_btn.setStyleSheet(self._button_style())
         form.addRow("", test_btn)
 
         # Noise reduction checkbox
-        noise_cb = QCheckBox("Enable noise reduction")
+        noise_cb = ModernCheckBox("Enable noise reduction")
         noise_cb.setStyleSheet("color: #cccccc;")
         self.widgets['audio.noise_reduction'] = noise_cb
         form.addRow("", noise_cb)
 
         # VAD checkbox
-        vad_cb = QCheckBox("Enable Voice Activity Detection")
+        vad_cb = ModernCheckBox("Enable Voice Activity Detection")
         vad_cb.setStyleSheet("color: #cccccc;")
         self.widgets['audio.vad_enabled'] = vad_cb
         form.addRow("", vad_cb)
@@ -266,8 +281,8 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Primary hotkey
         primary_layout = QHBoxLayout()
@@ -315,11 +330,11 @@ class SettingsPanel(QWidget):
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
 
         # Enabled checkbox
-        enabled_cb = QCheckBox("Enable overlay")
+        enabled_cb = ModernCheckBox("Enable overlay")
         enabled_cb.setStyleSheet("color: #cccccc;")
         self.widgets['overlay.enabled'] = enabled_cb
         form.addRow("", enabled_cb)
@@ -361,18 +376,99 @@ class SettingsPanel(QWidget):
 
         return group
 
+    def _create_macos_group(self) -> QGroupBox:
+        """Create the macOS-only settings group.
+
+        Houses Mac-native polish toggles. Both toggles apply *immediately*
+        (not on Save) since their effects are immediately visible.
+        """
+        group = QGroupBox("macOS")
+        group.setStyleSheet(self._group_style())
+
+        form = QFormLayout(group)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
+
+        # Open at Login — uses SMAppService (macOS 13+).
+        open_at_login_cb = ModernCheckBox("Open Whisper-Free at login")
+        open_at_login_cb.setStyleSheet("color: #cccccc;")
+        open_at_login_cb.setToolTip(
+            "Start Whisper-Free automatically when you log in. "
+            "May not work when running from source — only the bundled "
+            ".app installed to /Applications can register reliably."
+        )
+        open_at_login_cb.stateChanged.connect(self._on_open_at_login_toggled)
+        self.widgets['macos.open_at_login'] = open_at_login_cb
+        form.addRow("", open_at_login_cb)
+
+        # Show in Dock — toggles NSApp activation policy live.
+        show_in_dock_cb = ModernCheckBox("Show Whisper-Free in the Dock")
+        show_in_dock_cb.setStyleSheet("color: #cccccc;")
+        show_in_dock_cb.setToolTip(
+            "By default Whisper-Free is a menu-bar agent (no Dock icon). "
+            "Enable this to also show it in the Dock. Takes effect immediately."
+        )
+        show_in_dock_cb.stateChanged.connect(self._on_show_in_dock_toggled)
+        self.widgets['macos.show_in_dock'] = show_in_dock_cb
+        form.addRow("", show_in_dock_cb)
+
+        return group
+
+    def _on_open_at_login_toggled(self, state) -> None:
+        """Apply + persist Open-at-Login immediately."""
+        from PySide6.QtCore import Qt as _Qt
+        enabled = (state == _Qt.CheckState.Checked.value) or (state == _Qt.Checked)
+        try:
+            from app.platform import autolaunch
+            ok = autolaunch.set_open_at_login(enabled)
+            if not ok:
+                logger.warning(
+                    f"Open at Login {'enable' if enabled else 'disable'} failed. "
+                    "When running from source this is expected; the bundled "
+                    ".app installed to /Applications will work."
+                )
+        except Exception as e:
+            logger.error(f"Open at Login toggle failed: {e}")
+        try:
+            self.config.set('macos.open_at_login', enabled)
+            self.config.save()
+        except Exception as e:
+            logger.error(f"Could not persist macos.open_at_login: {e}")
+
+    def _on_show_in_dock_toggled(self, state) -> None:
+        """Apply + persist Show-in-Dock immediately."""
+        from PySide6.QtCore import Qt as _Qt
+        visible = (state == _Qt.CheckState.Checked.value) or (state == _Qt.Checked)
+        try:
+            from app.platform import set_dock_visible
+            set_dock_visible(visible)
+        except Exception as e:
+            logger.error(f"Show in Dock toggle failed: {e}")
+        try:
+            self.config.set('macos.show_in_dock', visible)
+            self.config.save()
+        except Exception as e:
+            logger.error(f"Could not persist macos.show_in_dock: {e}")
+
     def _create_advanced_group(self) -> QGroupBox:
         """Create Advanced settings group"""
         group = QGroupBox("Advanced")
         group.setStyleSheet(self._group_style())
 
         form = QFormLayout(group)
-        form.setSpacing(12)
-        form.setContentsMargins(16, 24, 16, 16)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
 
-        # fp16 checkbox
-        fp16_cb = QCheckBox("fp16 (GPU optimization)")
+        # fp16 checkbox. On macOS the MLX backend manages precision internally,
+        # so this setting is irrelevant — we keep the widget for cross-platform
+        # config parity but disable it with an explanatory tooltip.
+        fp16_cb = ModernCheckBox("fp16 (GPU optimization)")
         fp16_cb.setStyleSheet("color: #cccccc;")
+        if sys.platform == 'darwin':
+            fp16_cb.setEnabled(False)
+            fp16_cb.setToolTip(
+                "Not applicable on macOS — MLX manages precision automatically."
+            )
         self.widgets['whisper.fp16'] = fp16_cb
         form.addRow("", fp16_cb)
 
@@ -422,8 +518,14 @@ class SettingsPanel(QWidget):
                     lang_combo.setCurrentIndex(i)
                     break
 
-            device = self.config.get('whisper.device', 'cuda')
-            self.widgets['whisper.device_label'].setText(device.upper())
+            # Device label — platform-aware. On macOS the engine is always
+            # MLX on Apple Silicon regardless of what the config says
+            # (`device` is a Linux-era key that defaults to 'cuda').
+            if sys.platform == 'darwin':
+                device_text = "Apple Silicon (MLX)"
+            else:
+                device_text = self.config.get('whisper.device', 'cuda').upper()
+            self.widgets['whisper.device_label'].setText(device_text)
 
             # Audio
             audio_device = self.config.get('audio.device')
@@ -465,6 +567,18 @@ class SettingsPanel(QWidget):
                 self.config.get('overlay.auto_dismiss_ms', 2500)
             )
 
+            # macOS (only created on darwin)
+            if sys.platform == 'darwin':
+                # Block signals while we sync from config so the stateChanged
+                # handlers don't re-fire side effects (autolaunch register,
+                # setActivationPolicy) just from loading saved state.
+                for key in ('macos.open_at_login', 'macos.show_in_dock'):
+                    cb = self.widgets.get(key)
+                    if cb is not None:
+                        cb.blockSignals(True)
+                        cb.setChecked(self.config.get(key, False))
+                        cb.blockSignals(False)
+
             # Advanced
             self.widgets['whisper.fp16'].setChecked(
                 self.config.get('whisper.fp16', True)
@@ -483,6 +597,20 @@ class SettingsPanel(QWidget):
 
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
+
+    def update_vram_usage(self, usage_mb: float) -> None:
+        """Update the live memory display in the Whisper Model card.
+
+        Called from MainWindow.update_vram_usage so the Settings panel
+        stays in sync with whatever the status bar shows.
+        """
+        widget = self.widgets.get('vram_label')
+        if widget is None:
+            return
+        if usage_mb >= 1024:
+            widget.setText(f"{usage_mb / 1024:.2f} GB")
+        else:
+            widget.setText(f"{usage_mb:.0f} MB")
 
     def save_settings(self):
         """
@@ -646,8 +774,8 @@ class SettingsPanel(QWidget):
         # Emit change signal
         self.model_changed.emit(model_name)
         
-        # Update estimate label
-        req_vram = WhisperEngine.MODEL_VRAM_REQS.get(model_name, 0)
+        # Update estimate label — uses the current platform's engine reqs.
+        req_vram = model_memory_reqs().get(model_name, 0)
         self.vram_estimates_label.setText(f"Estimated Checkpoint Size: ~{req_vram} GB")
 
     def _test_recording(self):
@@ -680,24 +808,32 @@ class SettingsPanel(QWidget):
         return super().eventFilter(obj, event)
 
     def _reflow_grid(self):
+        """Reflow setting groups into a 2-column grid (3 rows on macOS).
+
+        macOS layout:
+            ┌─ Whisper Model ─┬─ Audio ───────┐
+            ├─ Hotkey ────────┼─ Overlay ─────┤
+            ├─ macOS ─────────┼─ Advanced ────┤
+            └─────────────────┴───────────────┘
+
+        Linux has 5 groups so the last cell stays empty — that's fine,
+        the empty space sits in the bottom-right corner.
         """
-        Reflow groups into grid.
-        Fixed layout: 2 columns.
-        """
-        # Clear layout
+        # Clear layout in place — takeAt(0) returns each item, we drop them.
         while self.grid_layout.count():
             self.grid_layout.takeAt(0)
-            
-        cols = 1
-            
+
+        cols = 2
         for i, widget in enumerate(self.setting_groups):
             row = i // cols
             col = i % cols
             self.grid_layout.addWidget(widget, row, col)
-            
-        # Set stretch
+
+        # Equal-width columns; allow rows to size to their content.
         for c in range(cols):
             self.grid_layout.setColumnStretch(c, 1)
+        self.grid_layout.setHorizontalSpacing(16)
+        self.grid_layout.setVerticalSpacing(16)
 
     # Stylesheet methods
     def _reset_hotkeys(self):
@@ -705,140 +841,32 @@ class SettingsPanel(QWidget):
         self.widgets['hotkey.primary'].setText('ctrl+space')
         self.widgets['hotkey.fallback'].setText('ctrl+shift+v')
 
-    # Stylesheet methods
+    # Style helpers — all delegate to the central theme module so visual
+    # tokens live in one place. See app/ui/theme.py.
     def _group_style(self) -> str:
-        """GroupBox stylesheet"""
-        return """
-            QGroupBox {
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding: 12px;
-                font-weight: bold;
-                color: #ffffff;
-                background-color: #252525;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-                background-color: transparent;
-            }
-        """
+        from app.ui.theme import group_qss
+        return group_qss()
 
     def _combo_style(self) -> str:
-        """ComboBox stylesheet"""
-        return """
-            QComboBox {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #ffffff;
-                min-width: 200px;
-            }
-            QComboBox:hover {
-                border-color: #0078d4;
-            }
-            QComboBox::drop-down {
-                border: none;
-                padding-right: 8px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                selection-background-color: #0078d4;
-                color: #ffffff;
-            }
-        """
+        from app.ui.theme import combo_qss
+        return combo_qss()
 
     def _lineedit_style(self) -> str:
-        """LineEdit stylesheet"""
-        return """
-            QLineEdit {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #ffffff;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-            }
-        """
+        from app.ui.theme import line_edit_qss
+        return line_edit_qss()
 
     def _button_style(self) -> str:
-        """Button stylesheet"""
-        return """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 8px 16px;
-                color: #ffffff;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                border-color: #4d4d4d;
-            }
-            QPushButton:pressed {
-                background-color: #4d4d4d;
-            }
-        """
+        from app.ui.theme import secondary_button_qss
+        return secondary_button_qss()
 
     def _primary_button_style(self) -> str:
-        """Primary button stylesheet"""
-        return """
-            QPushButton {
-                background-color: #0078d4;
-                border: 1px solid #0078d4;
-                border-radius: 4px;
-                padding: 10px 24px;
-                color: #ffffff;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #005a9e;
-                border-color: #005a9e;
-            }
-            QPushButton:pressed {
-                background-color: #004578;
-            }
-        """
+        from app.ui.theme import primary_button_qss
+        return primary_button_qss()
 
     def _spinbox_style(self) -> str:
-        """SpinBox stylesheet"""
-        return """
-            QSpinBox, QDoubleSpinBox {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 10px;
-                color: #ffffff;
-            }
-            QSpinBox:hover, QDoubleSpinBox:hover {
-                border-color: #0078d4;
-            }
-        """
+        from app.ui.theme import spin_qss
+        return spin_qss()
 
     def _slider_style(self) -> str:
-        """Slider stylesheet"""
-        return """
-            QSlider::groove:horizontal {
-                background: #3d3d3d;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #0078d4;
-                width: 16px;
-                height: 16px;
-                margin: -5px 0;
-                border-radius: 8px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #005a9e;
-            }
-        """
+        from app.ui.theme import slider_qss
+        return slider_qss()

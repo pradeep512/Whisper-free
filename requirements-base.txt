@@ -1,0 +1,35 @@
+# Cross-platform dependencies for Whisper-Free.
+# Platform-specific deps live in requirements-linux.txt / requirements-macos.txt.
+
+# UI Framework
+PySide6>=6.5.0
+
+# Audio Capture (PortAudio works on Linux + macOS)
+sounddevice>=0.4.6
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Hotkey Management (uses Quartz on macOS, X11/uinput on Linux)
+pynput>=1.7.6
+
+# Configuration
+PyYAML>=6.0
+
+# Audio File Loading (WAV/FLAC/OGG work without ffmpeg;
+# MP3/M4A/OPUS/WebM need ffmpeg installed system-wide)
+librosa>=0.10.0
+soundfile>=0.12.0
+audioread>=3.0.0
+
+# Utilities
+keyring>=24.0.0
+python-dateutil>=2.8.0
+
+# Packaging
+PyInstaller>=5.13.0
+
+# Development
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.0.0
+mypy>=1.5.0

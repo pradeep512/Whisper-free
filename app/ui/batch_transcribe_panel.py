@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 class FileStatus:
-    """File transcription status constants with icons"""
-    PENDING = "⏸️ Pending"
-    RUNNING = "▶️ Processing"
-    PAUSED = "⏸️ Paused"
-    COMPLETED = "✅ Completed"
-    FAILED = "❌ Failed"
+    """File transcription status labels (plain text — Mac convention)."""
+    PENDING = "Pending"
+    RUNNING = "Processing"
+    PAUSED = "Paused"
+    COMPLETED = "Completed"
+    FAILED = "Failed"
 
 
 class BatchTranscribePanel(QWidget):
@@ -82,49 +82,29 @@ class BatchTranscribePanel(QWidget):
         layout.setSpacing(12)
 
         # Header
+        from app.ui.theme import TEXT, TEXT_MUTED, table_qss
+
         header_layout = QHBoxLayout()
-        header = QLabel("Batch File Transcription")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        header = QLabel("Batch Transcription")
+        header.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT};")
         header_layout.addWidget(header)
         header_layout.addStretch()
 
         # Help text
         help_text = QLabel("Add multiple files and transcribe them sequentially")
-        help_text.setStyleSheet("color: #888888; font-size: 12px;")
+        help_text.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         header_layout.addWidget(help_text)
 
         layout.addLayout(header_layout)
 
-        # File list table
+        # File list table — uses the central theme so selection background
+        # respects accent + matches the rest of the app.
         self.file_table = QTableWidget()
         self.file_table.setColumnCount(5)
         self.file_table.setHorizontalHeaderLabels([
             "File Name", "Status", "Progress", "Duration", "Actions"
         ])
-
-        # Table styling
-        self.file_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 6px;
-                gridline-color: #3d3d3d;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                color: #ffffff;
-            }
-            QTableWidget::item:selected {
-                background-color: #0078d4;
-            }
-            QHeaderView::section {
-                background-color: #3d3d3d;
-                color: #ffffff;
-                padding: 8px;
-                border: none;
-                font-weight: bold;
-            }
-        """)
+        self.file_table.setStyleSheet(table_qss())
 
         # Table settings
         self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -146,19 +126,22 @@ class BatchTranscribePanel(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(8)
 
-        self.add_files_btn = self._create_button("➕ Add Files", "#0078d4")
+        # "Add Files" is a list-management action, not a primary commit —
+        # reserve the bright accent button for "Start Batch" alone so the
+        # primary action stands out.
+        self.add_files_btn = self._create_button("Add Files")
         self.add_files_btn.clicked.connect(self._on_add_files)
         button_layout.addWidget(self.add_files_btn)
 
-        self.remove_files_btn = self._create_button("➖ Remove Selected", "#d41e00")
+        self.remove_files_btn = self._create_button("Remove", variant="danger")
         self.remove_files_btn.clicked.connect(self._on_remove_files)
         button_layout.addWidget(self.remove_files_btn)
 
-        self.start_batch_btn = self._create_button("▶️ Start Batch", "#107c10")
+        self.start_batch_btn = self._create_button("Start Batch", primary=True)
         self.start_batch_btn.clicked.connect(self._on_start_batch)
         button_layout.addWidget(self.start_batch_btn)
 
-        self.clear_completed_btn = self._create_button("🗑️ Clear Completed", "#666666")
+        self.clear_completed_btn = self._create_button("Clear Completed")
         self.clear_completed_btn.clicked.connect(self._on_clear_completed)
         button_layout.addWidget(self.clear_completed_btn)
 
@@ -169,73 +152,45 @@ class BatchTranscribePanel(QWidget):
         progress_layout = QHBoxLayout()
         progress_layout.setSpacing(12)
 
-        progress_label = QLabel("Overall Progress:")
-        progress_label.setStyleSheet("color: #ffffff; font-weight: bold;")
+        from app.ui.theme import progress_qss
+
+        progress_label = QLabel("Overall progress")
+        progress_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         progress_layout.addWidget(progress_label)
 
         self.overall_progress = QProgressBar()
         self.overall_progress.setRange(0, 100)
         self.overall_progress.setValue(0)
-        self.overall_progress.setTextVisible(True)
-        self.overall_progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                background-color: #2d2d2d;
-                text-align: center;
-                color: #ffffff;
-                height: 24px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d4;
-                border-radius: 3px;
-            }
-        """)
+        self.overall_progress.setTextVisible(False)
+        self.overall_progress.setStyleSheet(progress_qss())
         progress_layout.addWidget(self.overall_progress, 1)
 
         self.progress_label = QLabel("0 / 0 files")
-        self.progress_label.setStyleSheet("color: #888888; font-size: 12px;")
+        self.progress_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         progress_layout.addWidget(self.progress_label)
 
         layout.addLayout(progress_layout)
 
-    def _create_button(self, text: str, color: str) -> QPushButton:
-        """Create styled button"""
+    def _create_button(self, text: str, primary: bool = False,
+                       variant: str = None) -> QPushButton:
+        """Create a styled button using the central theme.
+
+        Args:
+            text: Button label.
+            primary: If True, use the accent-color filled style.
+            variant: Optional 'danger' for destructive actions.
+        """
+        from app.ui.theme import (
+            primary_button_qss, secondary_button_qss, danger_button_qss,
+        )
         btn = QPushButton(text)
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                color: #ffffff;
-            }}
-            QPushButton:hover {{
-                background-color: {self._lighten_color(color)};
-            }}
-            QPushButton:pressed {{
-                background-color: {self._darken_color(color)};
-            }}
-            QPushButton:disabled {{
-                background-color: #3d3d3d;
-                color: #666666;
-            }}
-        """)
+        if variant == 'danger':
+            btn.setStyleSheet(danger_button_qss())
+        elif primary:
+            btn.setStyleSheet(primary_button_qss())
+        else:
+            btn.setStyleSheet(secondary_button_qss())
         return btn
-
-    def _lighten_color(self, hex_color: str) -> str:
-        """Lighten a hex color by 20%"""
-        color = QColor(hex_color)
-        h, s, l, a = color.getHsl()
-        return QColor.fromHsl(h, s, min(255, int(l * 1.2)), a).name()
-
-    def _darken_color(self, hex_color: str) -> str:
-        """Darken a hex color by 20%"""
-        color = QColor(hex_color)
-        h, s, l, a = color.getHsl()
-        return QColor.fromHsl(h, s, int(l * 0.8), a).name()
 
     def _connect_signals(self):
         """Connect to queue manager signals"""
@@ -294,24 +249,13 @@ class BatchTranscribePanel(QWidget):
         status_item.setForeground(QColor("#888888"))
         self.file_table.setItem(row, 1, status_item)
 
-        # Progress bar
+        # Progress bar — uses the central theme so chunk color matches accent.
+        from app.ui.theme import progress_qss
         progress_bar = QProgressBar()
         progress_bar.setRange(0, 100)
         progress_bar.setValue(0)
-        progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                background-color: #1d1d1d;
-                text-align: center;
-                color: #ffffff;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d4;
-                border-radius: 2px;
-            }
-        """)
+        progress_bar.setTextVisible(False)
+        progress_bar.setStyleSheet(progress_qss())
         self.file_table.setCellWidget(row, 2, progress_bar)
 
         # Duration (initially unknown)
@@ -325,67 +269,48 @@ class BatchTranscribePanel(QWidget):
         action_layout.setContentsMargins(4, 4, 4, 4)
         action_layout.setSpacing(4)
 
-        retry_btn = QPushButton("🔄")
-        retry_btn.setToolTip("Retry transcription")
-        retry_btn.setFixedSize(28, 28)
-        retry_btn.setEnabled(False)
+        # Per-row icon buttons — monochrome Unicode glyphs in a circular
+        # ghost button. Way less visually noisy than the previous colored
+        # emoji (🔄 ✖️ ℹ️), and matches macOS table-cell convention.
+        from app.ui.theme import (
+            BG_HOVER, BG_PRESSED, SEPARATOR, TEXT, TEXT_MUTED, DANGER, _shift,
+        )
+
+        def _icon_btn(glyph: str, tooltip: str, hover_color: str = None) -> QPushButton:
+            btn = QPushButton(glyph)
+            btn.setToolTip(tooltip)
+            btn.setFixedSize(24, 24)
+            btn.setEnabled(False)
+            hover_bg = hover_color or BG_PRESSED
+            hover_fg = "white" if hover_color else TEXT
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 12px;
+                    color: {TEXT_MUTED};
+                    font-size: 14px;
+                }}
+                QPushButton:hover:enabled {{
+                    background-color: {hover_bg};
+                    color: {hover_fg};
+                }}
+                QPushButton:disabled {{
+                    color: {SEPARATOR};
+                }}
+            """)
+            return btn
+
+        retry_btn = _icon_btn("↻", "Retry transcription")   # ↻
         retry_btn.clicked.connect(lambda: self._retry_file(file_path))
-        retry_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3d3d3d;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover:enabled {
-                background-color: #4d4d4d;
-            }
-            QPushButton:disabled {
-                color: #666666;
-            }
-        """)
         action_layout.addWidget(retry_btn)
 
-        cancel_btn = QPushButton("✖️")
-        cancel_btn.setToolTip("Cancel transcription")
-        cancel_btn.setFixedSize(28, 28)
-        cancel_btn.setEnabled(False)
+        cancel_btn = _icon_btn("×", "Cancel transcription", hover_color=DANGER)   # ×
         cancel_btn.clicked.connect(lambda: self._cancel_file(file_path))
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3d3d3d;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover:enabled {
-                background-color: #d41e00;
-            }
-            QPushButton:disabled {
-                color: #666666;
-            }
-        """)
         action_layout.addWidget(cancel_btn)
 
-        details_btn = QPushButton("ℹ️")
-        details_btn.setToolTip("View error details")
-        details_btn.setFixedSize(28, 28)
-        details_btn.setEnabled(False)
+        details_btn = _icon_btn("i", "View error details")
         details_btn.clicked.connect(lambda: self._show_error_details(file_path))
-        details_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3d3d3d;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover:enabled {
-                background-color: #4d4d4d;
-            }
-            QPushButton:disabled {
-                color: #666666;
-            }
-        """)
         action_layout.addWidget(details_btn)
 
         self.file_table.setCellWidget(row, 4, action_widget)
@@ -687,10 +612,10 @@ class BatchTranscribePanel(QWidget):
                     self,
                     "Batch Complete with Errors",
                     f"Batch transcription finished with some errors.\n\n"
-                    f"✅ Completed: {completed_count}\n"
-                    f"❌ Failed: {failed_count}\n"
+                    f"Completed: {completed_count}\n"
+                    f"Failed: {failed_count}\n"
                     f"Total: {total_files}\n\n"
-                    f"Click on the ℹ️ button next to failed files to view error details.",
+                    f"Click on the info button next to failed files to view error details.",
                     QMessageBox.Ok | QMessageBox.Retry
                 )
 

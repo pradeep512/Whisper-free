@@ -14,9 +14,12 @@ License: MIT
 from enum import Enum
 import math
 import os
+import sys
 import time
 from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout
-from PySide6.QtGui import QPainter, QColor, QPainterPath, QFont, QFontMetrics, QCursor
+from PySide6.QtGui import (
+    QPainter, QColor, QPainterPath, QPen, QFont, QFontMetrics, QCursor,
+)
 from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QRect, QSize, QPoint,
     QEasingCurve, Signal, QParallelAnimationGroup, Property, QEvent
@@ -82,15 +85,17 @@ class DynamicIslandOverlay(QWidget):
     stop_requested = Signal()    # User clicked 'Stop' button
 
     # Mode configurations: (width, height, opacity)
+    # Dimensions tuned for a Dynamic-Island-style capsule. Listening /
+    # Processing / Copied are full capsules (height == border radius * 2);
+    # Result and Status use a smaller-radius rounded rectangle for text.
     MODE_CONFIGS = {
-        OverlayMode.HIDDEN: (0, 0, 0.0),
-        OverlayMode.HIDDEN: (0, 0, 0.0),
-        OverlayMode.MINIMAL: (30, 30, 0.4),     # Tiny dot when idle
-        OverlayMode.LISTENING: (320, 50, 1.0),  # Compact recording bar
-        OverlayMode.PROCESSING: (200, 50, 0.9), # Compact processing pill
-        OverlayMode.RESULT: (600, 160, 1.0),    # Taller for better text fit
-        OverlayMode.COPIED: (200, 50, 0.9),
-        OverlayMode.STATUS: (300, 100, 0.95),   # Info card
+        OverlayMode.HIDDEN:     (0,   0,  0.0),
+        OverlayMode.MINIMAL:    (26,  26, 0.5),    # Small dot when idle
+        OverlayMode.LISTENING:  (260, 44, 1.0),    # Compact capsule
+        OverlayMode.PROCESSING: (140, 44, 0.95),   # Compact capsule
+        OverlayMode.RESULT:     (560, 140, 1.0),   # Rounded card with text
+        OverlayMode.COPIED:     (160, 44, 0.95),   # Compact capsule
+        OverlayMode.STATUS:     (300, 100, 0.95),  # Info card
     }
 
     def __init__(self):
@@ -171,7 +176,18 @@ class DynamicIslandOverlay(QWidget):
         geometry changes, we skip geometry animation on Wayland and set
         geometry directly instead.
         """
-        self._is_wayland = os.environ.get('XDG_SESSION_TYPE', '') == 'wayland'
+        # _is_wayland is Linux-only. On macOS XDG_SESSION_TYPE is unset, but we
+        # guard with sys.platform so the Wayland code paths never activate
+        # even if someone weirdly sets the env var on Mac.
+        self._is_wayland = (
+            sys.platform.startswith('linux')
+            and os.environ.get('XDG_SESSION_TYPE', '') == 'wayland'
+        )
+
+        # Tracks whether we've applied macOS-specific NSWindow collection
+        # behavior. Applied once on first show (NSWindow doesn't exist until
+        # the widget is realized).
+        self._macos_window_behavior_applied = False
 
         flags = (
             Qt.FramelessWindowHint |
@@ -399,12 +415,33 @@ class DynamicIslandOverlay(QWidget):
         # Start animation
         self._animation_group.start()
 
-        # Show window if hidden
-        if not self.isVisible() and self._mode != OverlayMode.HIDDEN:
-            self.show()
-        elif self._mode == OverlayMode.HIDDEN:
+        # Ensure the overlay surfaces. Always show + raise — even if Qt
+        # thinks it's already visible — to defeat focus-race conditions
+        # when the trigger came from inside a focused window (e.g. clicking
+        # the in-window Record button, or selecting a tray menu item that
+        # just dismissed a nested QMenu event loop).
+        if self._mode != OverlayMode.HIDDEN:
+            # Defer via QTimer.singleShot(0, ...) so any nested event loop
+            # (the tray's QMenu, a context menu dismiss animation, etc.)
+            # has finished unwinding before we try to bring the overlay up.
+            QTimer.singleShot(0, self._ensure_visible)
+        else:
             # Hide after animation completes
             self._animation_group.finished.connect(self.hide)
+
+    def _ensure_visible(self) -> None:
+        """Force the overlay window to be on screen and on top.
+
+        Called via QTimer.singleShot(0) from set_mode/_animate_to_geometry
+        so any nested event loop has finished. Tool windows on macOS can
+        silently fail to come to front when the trigger originated from a
+        focused window; show()+raise_() is the proven combo.
+        """
+        try:
+            self.show()
+            self.raise_()
+        except Exception as e:
+            logger.warning(f"_ensure_visible failed: {e}")
 
     def _animate_opacity_only(self, target_opacity: float, duration: int = 300, on_done=None) -> None:
         """
@@ -583,29 +620,39 @@ class DynamicIslandOverlay(QWidget):
             self._paint_status(painter, width, height)
 
     def _paint_background(self, painter: QPainter, width: int, height: int) -> None:
-        """
-        Paint rounded rectangle background with border.
+        """Paint capsule/rounded background, Dynamic-Island style.
 
-        Args:
-            painter: QPainter instance
-            width: Widget width
-            height: Widget height
-
-        Background:
-            - Fill: rgba(0, 0, 0, 217) [black with 85% opacity]
-            - Border: 1px rgba(255, 255, 255, 0.1) [white with 10% opacity]
-            - Border radius: 50px (very rounded)
+        - For compact pill modes (LISTENING/PROCESSING/COPIED/MINIMAL):
+          radius = height/2 → full capsule.
+        - For card modes (RESULT/STATUS): radius = 22 → rounded card.
+        - Background: rgba(22, 22, 26, 235) — nearly opaque charcoal,
+          a touch translucent for visual depth without real blur.
+        - Hairline border: rgba(255, 255, 255, 18) — barely visible,
+          adds polish at the edge against bright backgrounds.
         """
-        # Create rounded rectangle path
+        # Pick radius per mode shape.
+        compact_modes = {
+            OverlayMode.MINIMAL, OverlayMode.LISTENING,
+            OverlayMode.PROCESSING, OverlayMode.COPIED,
+        }
+        if self._mode in compact_modes:
+            radius = height / 2.0
+        else:
+            radius = 22.0
+
+        # Inset by 0.5 so the 1-px border lands on whole pixels.
         path = QPainterPath()
-        path.addRoundedRect(0, 0, width, height, 16, 16) # Reduced radius from 50 to 16
+        path.addRoundedRect(0.5, 0.5, width - 1, height - 1, radius, radius)
 
-        # Fill background
-        painter.fillPath(path, QColor(0, 0, 0, 217))
+        # Fill: charcoal at ~92% opacity. Slightly warm-dark, less harsh
+        # than pure black — matches macOS Dynamic Island and Notch Nook.
+        painter.fillPath(path, QColor(22, 22, 26, 235))
 
-        # Draw border
-        border_color = QColor(255, 255, 255, 26)  # 10% opacity = 26/255
-        painter.setPen(border_color)
+        # Hairline border for definition over bright backgrounds.
+        pen = QPen(QColor(255, 255, 255, 18))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
         painter.drawPath(path)
 
     def _paint_minimal(self, painter: QPainter, width: int, height: int) -> None:
@@ -619,91 +666,78 @@ class DynamicIslandOverlay(QWidget):
         painter.drawEllipse(center, radius, radius)
 
     def _paint_listening(self, painter: QPainter, width: int, height: int) -> None:
-        """Paint LISTENING mode: Close Btn | Waveform | Stop Btn."""
-        
-        # 1. Close/Cancel Button (Left)
-        # -----------------------------
-        btn_size = 24  # Slightly smaller
-        padding_x = 10 # Reduced padding
+        """Paint LISTENING mode: [×] [waveform] [■] — Dynamic-Island style."""
+
+        # Layout knobs tuned for the 44-px-tall capsule.
+        btn_size = 22
+        padding_x = 8
         center_y = height // 2
-        
-        self._cancel_btn_rect = QRect(padding_x, center_y - btn_size // 2, btn_size, btn_size)
-        
-        # Draw Circle Background (Gray)
+
+        # 1. Cancel button (left) — soft gray circle with × glyph.
+        self._cancel_btn_rect = QRect(
+            padding_x, center_y - btn_size // 2, btn_size, btn_size
+        )
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(128, 128, 128, 150))
+        painter.setBrush(QColor(255, 255, 255, 38))   # subtle white fill
         painter.drawEllipse(self._cancel_btn_rect)
-        
-        # Draw 'X' Icon
-        painter.setPen(QColor(255, 255, 255))
-        painter.setFont(QFont("Inter", 12, QFont.Bold))
+
+        painter.setPen(QColor(255, 255, 255, 200))
+        painter.setFont(QFont("-apple-system", 13, QFont.Medium))
         painter.drawText(self._cancel_btn_rect, Qt.AlignCenter, "×")
 
-        # 2. Stop Button (Right)
-        # ----------------------
+        # 2. Stop button (right) — solid red circle with white square.
         stop_btn_x = width - padding_x - btn_size
-        self._stop_btn_rect = QRect(stop_btn_x, center_y - btn_size // 2, btn_size, btn_size)
-
-        # Draw Circle Background (Red)
+        self._stop_btn_rect = QRect(
+            stop_btn_x, center_y - btn_size // 2, btn_size, btn_size
+        )
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(255, 59, 48)) # Start with Red
+        painter.setBrush(QColor(255, 59, 48))   # macOS systemRed
         painter.drawEllipse(self._stop_btn_rect)
-        
-        # Draw Stop Square
+
         square_size = 8
         square_rect = QRect(
             stop_btn_x + (btn_size - square_size) // 2,
             center_y - square_size // 2,
-            square_size,
-            square_size
+            square_size, square_size,
         )
-        painter.setBrush(QColor(255, 255, 255)) # White
-        painter.drawRoundedRect(square_rect, 2, 2)
+        painter.setBrush(QColor(255, 255, 255))
+        painter.drawRoundedRect(square_rect, 1.5, 1.5)
 
-        # 3. Waveform (Center)
-        # --------------------
-        # Space between buttons (tight gap)
+        # 3. Waveform (center) — bars in white, sized to the capsule.
         start_x = self._cancel_btn_rect.right() + 6
         end_x = self._stop_btn_rect.left() - 6
         waveform_width = end_x - start_x
-        
+
         if self._waveform_data and waveform_width > 0:
-            waveform_rect = QRect(start_x, 10, waveform_width, height - 20)
+            top_pad = 8
+            wf_rect = QRect(
+                start_x, top_pad, waveform_width, height - top_pad * 2
+            )
             WaveformPainter.paint_waveform(
                 painter,
                 self._waveform_data,
-                waveform_rect,
-                bar_count=22, # Reduced bar count to fit smaller width
-                bar_width=4,
-                bar_spacing=5,
-                min_height=4,
-                max_height=height - 20
+                wf_rect,
+                bar_count=20,
+                bar_width=3,
+                bar_spacing=4,
+                min_height=3,
+                max_height=height - top_pad * 2,
             )
 
     def _paint_processing(self, painter: QPainter, width: int, height: int) -> None:
-        """Paint PROCESSING mode: Animated 3-dot pulse."""
-        
-        # Center coordinates
+        """Paint PROCESSING mode: animated 3-dot pulse — tight in 44 px."""
         center_x = width // 2
         center_y = height // 2
-        
-        # Dot configuration
-        dot_radius = 4
-        spacing = 14
-        
-        # Current time for animation phase
-        t = time.time() * 5 # Speed multiplier
-        
+
+        dot_radius = 3
+        spacing = 12
+        t = time.time() * 5  # animation phase
+
         painter.setPen(Qt.NoPen)
-        
-        # Draw 3 dots
         for i in range(3):
-            # Calculate opacity based on sine wave with offset for each dot
-            # Result is 0.2 to 1.0 opacity
-            opacity = 0.2 + 0.8 * (0.5 * (1 + math.sin(t - i * 0.8)))
-            
+            # Opacity oscillates 0.25 → 1.0 per dot with a phase offset.
+            opacity = 0.25 + 0.75 * (0.5 * (1 + math.sin(t - i * 0.8)))
             x = center_x + (i - 1) * spacing
-            
             painter.setBrush(QColor(255, 255, 255, int(255 * opacity)))
             painter.drawEllipse(QPoint(x, center_y), dot_radius, dot_radius)
 
@@ -760,8 +794,44 @@ class DynamicIslandOverlay(QWidget):
         # (Skipping complicated icon drawing for cleanliness)
 
     def _paint_copied(self, painter: QPainter, width: int, height: int) -> None:
-        """Paint COPIED mode: 'Copied!' confirmation."""
-        self._paint_text(painter, "Copied!", width, height)
+        """Paint COPIED mode: ✓ Copied — green check + text, capsule-fit."""
+        from PySide6.QtCore import QPointF
+
+        center_y = height // 2
+
+        # Green check circle on the left.
+        circle_d = 20
+        circle_x = (width - 120) // 2   # left of text block
+        circle_rect = QRect(circle_x, center_y - circle_d // 2, circle_d, circle_d)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(52, 199, 89))   # macOS systemGreen
+        painter.drawEllipse(circle_rect)
+
+        # White checkmark inside the circle.
+        check_pen = QPen(QColor(255, 255, 255, 255))
+        check_pen.setWidth(2)
+        check_pen.setCapStyle(Qt.RoundCap)
+        check_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(check_pen)
+        # Three points: down-left, down-mid, up-right
+        cx = circle_x + circle_d / 2.0
+        cy = center_y
+        painter.drawLine(
+            QPointF(cx - 4.5, cy + 0.5),
+            QPointF(cx - 1.0, cy + 4.0),
+        )
+        painter.drawLine(
+            QPointF(cx - 1.0, cy + 4.0),
+            QPointF(cx + 5.0, cy - 3.5),
+        )
+
+        # "Copied" text to the right of the check.
+        painter.setPen(QColor(255, 255, 255, 240))
+        painter.setFont(QFont("-apple-system", 14, QFont.Medium))
+        text_rect = QRect(
+            circle_x + circle_d + 8, 0, width - circle_x - circle_d - 16, height
+        )
+        painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, "Copied")
 
     def _paint_status(self, painter: QPainter, width: int, height: int) -> None:
         """Paint STATUS mode: Model and Device info."""
@@ -810,6 +880,34 @@ class DynamicIslandOverlay(QWidget):
         # Use elided text if no wrapping requested and it overflows?
         # For now, just draw.
         painter.drawText(target_rect, align, text)
+
+    def showEvent(self, event):
+        """Apply macOS-native overlay behavior on first show.
+
+        QWidget only materializes its NSView/NSWindow when it is first shown,
+        so winId() returns 0 before that. Hooking into showEvent guarantees
+        the backing NSWindow exists when we try to set collection behavior.
+        Idempotent — only applies once.
+        """
+        super().showEvent(event)
+        self._apply_macos_window_behavior_if_needed()
+
+    def _apply_macos_window_behavior_if_needed(self) -> None:
+        """One-time apply of NSWindow collection behavior on macOS.
+
+        Makes the overlay appear across all Spaces and over full-screen apps.
+        No-op on non-darwin or when pyobjc is unavailable.
+        """
+        if self._macos_window_behavior_applied:
+            return
+        if sys.platform != 'darwin':
+            return
+        try:
+            from app.platform.macos.init import apply_overlay_window_behavior
+            if apply_overlay_window_behavior(self):
+                self._macos_window_behavior_applied = True
+        except Exception as e:
+            logger.debug(f"_apply_macos_window_behavior_if_needed: {e}")
 
     def mousePressEvent(self, event):
         """Handle mouse clicks."""

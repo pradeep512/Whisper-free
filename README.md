@@ -8,6 +8,29 @@ Whisper-Free is a local, privacy-first speech-to-text desktop app with a lightwe
 
 ## Screenshots
 
+### macOS (v1.0.0)
+
+The Dynamic Island overlay shown live during recording (waveform, cancel `×`, stop `■`):
+
+<p align="center">
+  <img src="assets/macos/ui-overlay.png" alt="Dynamic Island overlay during recording" width="640"/>
+</p>
+
+The main window — menu bar agent app with sidebar nav, coral-orange accent, dark theme:
+
+<table>
+  <tr>
+    <td><img src="assets/macos/ui-history.png" width="420" alt="History"/></td>
+    <td><img src="assets/macos/ui-transcribe.png" width="420" alt="Transcribe — 2×2 grid"/></td>
+  </tr>
+  <tr>
+    <td><img src="assets/macos/ui-batch-transcribe.png" width="420" alt="Batch Transcription"/></td>
+    <td><img src="assets/macos/ui-settings.png" width="420" alt="Settings — 3×2 grid"/></td>
+  </tr>
+</table>
+
+### Linux
+
 <table>
   <tr>
     <td><img src="assets/ui-history.png" width="420" alt="Transcription History"/></td>
@@ -32,10 +55,18 @@ Whisper-Free is a local, privacy-first speech-to-text desktop app with a lightwe
 
 ## Requirements
 
+**Linux**
 - Linux (tested on GNOME)
 - Python 3.10+
 - FFmpeg (required for MP3/M4A/WebM file transcription)
-- Atleast 2GB VGA
+- At least 2 GB VRAM (NVIDIA GPU recommended; CPU fallback is slow)
+
+**macOS** (new in v1.0.0)
+- Apple Silicon Mac (M1, M2, M3, or M4) — **Intel Macs are not supported**
+- macOS 13.5 Ventura or newer
+- Python 3.10+ (only needed for source builds)
+- FFmpeg (required for MP3/M4A/WebM file transcription)
+- ~500 MB free disk space for the app + default `small` model
 
 ## Install using git repo
 
@@ -48,14 +79,21 @@ cd whisper-free
 python -m venv venv
 source venv/bin/activate
 
-# 3) Install deps
-pip install -r requirements.txt
+# 3) Install deps (Linux)
+pip install -r requirements-linux.txt
+
+# 3) ...or install deps (macOS, Apple Silicon)
+pip install -r requirements-macos.txt
 ```
 
 Install ffmpeg if you plan to transcribe MP3/M4A/WebM:
 
 ```bash
+# Linux
 sudo apt-get install ffmpeg
+
+# macOS
+brew install ffmpeg
 ```
 
 ## Run
@@ -121,16 +159,30 @@ See `archive/docs/README_FILE_TRANSCRIPTION.md` for detailed file transcription 
 
 ## Troubleshooting
 
-- Overlay stuck in the middle on GNOME Wayland: ensure XWayland mode is active (default). Try `whisper --xwayland`.
-- MP3/M4A won't load: install ffmpeg.
+For known issues being tracked for the v1.0.0 macOS release, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+
+- **Linux** — Overlay stuck in the middle on GNOME Wayland: ensure XWayland mode is active (default). Try `whisper --xwayland`.
+- **Linux/macOS** — MP3/M4A won't load: install ffmpeg.
+- **macOS** — Hotkey doesn't fire: System Settings → Privacy & Security → Accessibility → ensure Whisper-Free is listed and enabled. Re-add it if you replaced the app binary (Mac invalidates the entry on signature change).
+- **macOS** — Microphone prompt didn't appear: open System Settings → Privacy & Security → Microphone → toggle Whisper-Free on. The system only prompts once per binary path.
+- **macOS** — App "is damaged" error: this is Gatekeeper on a quarantined binary. Run `xattr -d com.apple.quarantine /Applications/Whisper-Free.app`, then re-launch.
 
 ## Project Layout
 
 - `app/` main application code
-- `app/ui/overlay.py` overlay UI
-- `scripts/whisper` CLI entry point
-- `configs/` config templates
-- `assets/` optional demo video and media
+  - `app/platform/{linux,macos}/` platform-specific shims (paths, hotkey perms, tray icon, autolaunch)
+  - `app/ui/overlay.py` overlay UI
+  - `app/ui/onboarding_wizard.py` first-launch permission wizard (macOS)
+  - `app/core/whisper_engine.py` PyTorch backend (Linux: CUDA / CPU)
+  - `app/core/whisper_engine_mlx.py` MLX backend (macOS: Apple Silicon)
+- `scripts/whisper` CLI entry point (Linux)
+- `scripts/whisper-free` CLI entry point (macOS)
+- `scripts/build_macos.sh` one-shot macOS build script
+- `packaging/appimage/` AppImage build artifacts (Linux)
+- `packaging/macos/` PyInstaller spec + hooks (macOS)
+- `packaging/homebrew/` Homebrew Cask formula
+- `assets/` icon, screenshots, demo video
+- `docs/` ARCHITECTURE, MACOS_PORT, BUILD_MACOS reference docs
 
 
 
@@ -187,6 +239,63 @@ Then refresh desktop databases:
 update-desktop-database ~/.local/share/applications
 gtk-update-icon-cache ~/.local/share/icons/hicolor
 ```
+
+## Install on macOS
+
+Whisper-Free on macOS runs as a **menu bar agent** (no Dock icon by default) and uses Apple's **MLX** framework for fast on-device transcription. Apple Silicon (M1+) only.
+
+### Option 1: Homebrew Cask (recommended)
+
+```bash
+brew install --cask whisper-free
+```
+
+This installs `Whisper-Free.app` into `/Applications` and a `whisper-free` CLI shim into `/opt/homebrew/bin/` so you can trigger recording from Raycast / Alfred / Keyboard Maestro.
+
+### Option 2: Direct DMG download
+
+1. Download `Whisper-Free-<version>.dmg` from the [Releases page](https://github.com/pradeep512/Whisper-free/releases).
+2. Open the DMG and drag `Whisper-Free.app` to `/Applications`.
+
+### First launch: bypass Gatekeeper
+
+Whisper-Free is currently **unsigned** — Apple Developer Program enrollment ($99/yr) is on the roadmap for a future release. Until then, macOS will block the first launch with:
+
+> *"Whisper-Free" can't be opened because Apple cannot check it for malicious software.*
+
+To bypass:
+
+- **macOS 13–14**: Right-click `Whisper-Free.app` in Finder → **Open** → click **Open** in the dialog. macOS remembers this and won't ask again.
+- **macOS 15 (Sequoia)** and newer: open **System Settings → Privacy & Security → Security**, scroll to the bottom, and click **"Open Anyway"** next to *"Whisper-Free was blocked"*. Then re-launch and confirm.
+
+### First launch: grant permissions
+
+An onboarding wizard guides you through the two macOS permissions Whisper-Free needs:
+
+1. **Microphone access** — granted via a standard macOS system prompt. Click **OK**.
+2. **Accessibility access** — needed for the global hotkey to work from any app. Click **Open Settings** in the wizard, then toggle **Whisper-Free** on in *Privacy & Security → Accessibility*. The wizard auto-detects when you've granted it.
+
+### Using Whisper-Free on macOS
+
+- **Menu bar icon**: click to start/stop recording. Right-click for "Open Window…" and "Quit".
+- **Hotkey**: defaults to **Right Option** (single tap) on macOS, mirroring native Dictation. Configurable in *Open Window… → Settings → Hotkey*.
+- **Main window**: opened on demand from the menu bar (or set *Settings → macOS → Show Whisper-Free in the Dock* if you prefer a Dock app).
+- **Open at login**: toggle in *Settings → macOS → Open Whisper-Free at login*.
+
+### Build the .app yourself (from source)
+
+```bash
+# Prerequisites
+brew install create-dmg ffmpeg
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements-macos.txt
+
+# Build .app + .dmg
+./scripts/build_macos.sh
+```
+
+Outputs land in `dist/Whisper-Free.app` and `dist/Whisper-Free-<version>.dmg`. See `docs/BUILD_MACOS.md` for the full runbook.
 
 ## License
 
