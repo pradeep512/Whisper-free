@@ -197,28 +197,43 @@ def main_window_qss() -> str:
 
 
 def primary_button_qss() -> str:
-    """Filled accent-color button (Save, Transcribe, Start Batch)."""
+    """Modern macOS Sequoia / Tahoe primary button.
+
+    Subtle top-to-bottom gradient (lighter blue at top → core accent at
+    bottom) gives the button visual depth like a real Mac NSButton's
+    bordered prominent style. Hairline white highlight at the top and a
+    darker rim at the bottom add the "raised" effect without needing
+    NSVisualEffectView.
+    """
+    accent  = system_accent()        # #0a84ff
+    top     = _shift(accent, 1.18)   # lighter top stop
+    hover_t = _shift(accent, 1.30)
+    hover_b = _shift(accent, 1.05)
+    pressed = _shift(accent, 0.85)
     return f"""
         QPushButton {{
-            background-color: {system_accent()};
-            border: 1px solid {system_accent()};
-            border-radius: {RADIUS_M}px;
-            padding: 7px 16px;
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 {top}, stop:1 {accent});
+            border: 1px solid {_shift(accent, 0.88)};
+            border-top: 1px solid {hover_t};
+            border-radius: 7px;
+            padding: 6px 18px;
             color: white;
             font-weight: 600;
             font-size: 13px;
         }}
         QPushButton:hover {{
-            background-color: {accent_hover()};
-            border-color: {accent_hover()};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 {hover_t}, stop:1 {hover_b});
+            border: 1px solid {accent};
         }}
         QPushButton:pressed {{
-            background-color: {accent_pressed()};
-            border-color: {accent_pressed()};
+            background: {pressed};
+            border: 1px solid {_shift(pressed, 0.85)};
         }}
         QPushButton:disabled {{
-            background-color: {BG_HOVER};
-            border-color: {BG_HOVER};
+            background: {BG_HOVER};
+            border: 1px solid {BG_HOVER};
             color: {TEXT_DIM};
         }}
     """
