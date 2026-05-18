@@ -77,13 +77,15 @@ class FileTranscribePanel(QWidget):
 
     def _setup_ui(self):
         """Create UI layout"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        from app.ui.theme import TEXT
 
-        # Header
-        header = QLabel("File Transcribe")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)   # generous gap between the title and the first card
+
+        # Header (mirrors the sidebar tab label).
+        header = QLabel("Transcribe")
+        header.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT};")
         layout.addWidget(header)
 
         # Scrollable area
@@ -95,6 +97,7 @@ class FileTranscribePanel(QWidget):
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(16)
+        scroll_layout.setContentsMargins(0, 4, 0, 0)   # small breathing room at top
         scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Add sections

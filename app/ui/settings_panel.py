@@ -69,13 +69,15 @@ class SettingsPanel(QWidget):
         - Overlay
         - Advanced
         """
+        from app.ui.theme import TEXT
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)   # generous gap between the title and the first card
 
         # Header
         header_label = QLabel("Settings")
-        header_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+        header_label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT};")
         layout.addWidget(header_label)
 
         # Scrollable area for settings

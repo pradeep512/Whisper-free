@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
         self.sidebar.clear()
 
         # Top items
-        for text in ["History", "File Transcribe", "Batch Files", "Settings"]:
+        for text in ["History", "Transcribe", "Batch Files", "Settings"]:
             item = QListWidgetItem(text)
             item.setSizeHint(QSize(140, 45))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -179,7 +179,7 @@ class MainWindow(QMainWindow):
         else:
             # Create placeholder if engine not available
             self.file_transcribe_panel = self._create_placeholder_panel(
-                "File Transcribe",
+                "Transcribe",
                 "File transcription requires WhisperEngine.\nPlease restart the application."
             )
 

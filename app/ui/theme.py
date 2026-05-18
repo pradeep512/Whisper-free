@@ -428,8 +428,11 @@ def group_qss() -> str:
             background-color: {BG_ELEVATED};
             border: 1px solid {SEPARATOR};
             border-radius: {RADIUS_L}px;
-            margin-top: 14px;
-            padding: 8px 4px 4px 4px;
+            /* margin-top makes room for the title above the border;
+               the larger top padding inside the box gives the title
+               breathing room from the content below it. */
+            margin-top: 18px;
+            padding: 22px 14px 14px 14px;
             font-weight: 600;
             color: {TEXT};
             font-size: 13px;
@@ -437,7 +440,8 @@ def group_qss() -> str:
         QGroupBox::title {{
             subcontrol-origin: margin;
             subcontrol-position: top left;
-            padding: 2px 10px;
+            left: 14px;        /* align with the inner content padding */
+            padding: 0 6px;
             background: transparent;
             color: {TEXT};
         }}
