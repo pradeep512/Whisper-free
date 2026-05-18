@@ -174,60 +174,74 @@ class FileTranscribePanel(QWidget):
         return group
 
     def _create_output_format_group(self) -> QGroupBox:
-        """Create output format selection section"""
+        """Create output format selection section.
+
+        Uses ModernCheckBox (custom-painted, theme-aware) instead of the
+        default QCheckBox so the indicator stays consistent with the
+        app's orange accent and doesn't render with Qt's system-blue
+        macOS-native checkbox style.
+        """
+        from app.ui.theme import TEXT, TEXT_MUTED
+        from app.ui.widgets import ModernCheckBox
+
         group = QGroupBox("Output Formats")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(16, 24, 16, 16)
+        # Use group_qss's internal padding — don't double up on contentsMargins.
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # Info label
+        # Section helper text
         info_label = QLabel("Select which file formats to create:")
-        info_label.setStyleSheet("color: #cccccc;")
+        info_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         layout.addWidget(info_label)
 
-        # Format checkboxes in a grid
+        # Format checkboxes in a 2-column grid using our custom widget.
         checkbox_layout = QGridLayout()
-        checkbox_layout.setSpacing(8)
+        checkbox_layout.setHorizontalSpacing(24)
+        checkbox_layout.setVerticalSpacing(2)
 
-        # Create checkboxes for each format
         self.format_checkboxes = {}
 
         formats = [
-            ('txt', 'Plain Text (.txt)', 'Basic text transcription'),
-            ('srt', 'SRT Subtitles (.srt)', 'For video editing software'),
-            ('vtt', 'WebVTT (.vtt)', 'For web video players'),
-            ('json', 'JSON (.json)', 'Full data with timestamps'),
-            ('tsv', 'TSV (.tsv)', 'Tab-separated timestamps'),
+            ('txt',  'Plain Text (.txt)',     'Basic text transcription'),
+            ('srt',  'SRT Subtitles (.srt)',  'For video editing software'),
+            ('vtt',  'WebVTT (.vtt)',         'For web video players'),
+            ('json', 'JSON (.json)',          'Full data with timestamps'),
+            ('tsv',  'TSV (.tsv)',            'Tab-separated timestamps'),
         ]
 
         for i, (format_key, label, tooltip) in enumerate(formats):
-            checkbox = QCheckBox(label)
+            checkbox = ModernCheckBox(label)
             checkbox.setToolTip(tooltip)
-            checkbox.setStyleSheet("color: #ffffff;")
 
-            # Load initial state from config
-            enabled = self.config.get(f'file_transcribe.output_formats.{format_key}', format_key == 'txt')
+            enabled = self.config.get(
+                f'file_transcribe.output_formats.{format_key}',
+                format_key == 'txt',
+            )
             checkbox.setChecked(enabled)
-
-            # Connect signal to save config
             checkbox.stateChanged.connect(
                 lambda state, key=format_key: self._on_format_checkbox_changed(key, state)
             )
 
             self.format_checkboxes[format_key] = checkbox
+            checkbox_layout.addWidget(checkbox, i // 2, i % 2)
 
-            # Add to grid (2 columns)
-            row = i // 2
-            col = i % 2
-            checkbox_layout.addWidget(checkbox, row, col)
+        # Left-align both columns
+        checkbox_layout.setColumnStretch(0, 0)
+        checkbox_layout.setColumnStretch(1, 0)
+        checkbox_layout.setColumnStretch(2, 1)
 
         layout.addLayout(checkbox_layout)
 
-        # Note about text display
-        note = QLabel("Note: Only .txt content will be displayed below. Other formats will be created as files.")
-        note.setStyleSheet("color: #666666; font-size: 11px; font-style: italic; margin-top: 8px;")
+        # Footnote
+        note = QLabel(
+            "Note: only .txt content is displayed below; other formats are saved as files."
+        )
+        note.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: 11px; font-style: italic; margin-top: 4px;"
+        )
         note.setWordWrap(True)
         layout.addWidget(note)
 
