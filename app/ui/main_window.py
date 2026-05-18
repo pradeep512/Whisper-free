@@ -463,7 +463,7 @@ class MainWindow(QMainWindow):
         )
 
     def update_vram_usage(self, usage_mb: float):
-        """Update memory display in status bar.
+        """Update memory display in status bar AND in the Settings panel.
 
         On macOS the label says "Memory" (MLX uses unified memory, not VRAM).
         On Linux it says "VRAM" (NVIDIA GPU memory).
@@ -473,6 +473,14 @@ class MainWindow(QMainWindow):
             self.vram_label.setText(f"{prefix}: {usage_mb / 1024:.2f} GB")
         else:
             self.vram_label.setText(f"{prefix}: {usage_mb:.0f} MB")
+
+        # Mirror to the Settings panel's live "Unified memory" / "Actual VRAM"
+        # row so the user can see the same number when opening Settings.
+        try:
+            if self.settings_panel is not None:
+                self.settings_panel.update_vram_usage(usage_mb)
+        except Exception:
+            pass
 
     def _load_history(self):
         """Load initial history from database"""

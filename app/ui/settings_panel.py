@@ -518,8 +518,14 @@ class SettingsPanel(QWidget):
                     lang_combo.setCurrentIndex(i)
                     break
 
-            device = self.config.get('whisper.device', 'cuda')
-            self.widgets['whisper.device_label'].setText(device.upper())
+            # Device label — platform-aware. On macOS the engine is always
+            # MLX on Apple Silicon regardless of what the config says
+            # (`device` is a Linux-era key that defaults to 'cuda').
+            if sys.platform == 'darwin':
+                device_text = "Apple Silicon (MLX)"
+            else:
+                device_text = self.config.get('whisper.device', 'cuda').upper()
+            self.widgets['whisper.device_label'].setText(device_text)
 
             # Audio
             audio_device = self.config.get('audio.device')
@@ -591,6 +597,20 @@ class SettingsPanel(QWidget):
 
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
+
+    def update_vram_usage(self, usage_mb: float) -> None:
+        """Update the live memory display in the Whisper Model card.
+
+        Called from MainWindow.update_vram_usage so the Settings panel
+        stays in sync with whatever the status bar shows.
+        """
+        widget = self.widgets.get('vram_label')
+        if widget is None:
+            return
+        if usage_mb >= 1024:
+            widget.setText(f"{usage_mb / 1024:.2f} GB")
+        else:
+            widget.setText(f"{usage_mb:.0f} MB")
 
     def save_settings(self):
         """

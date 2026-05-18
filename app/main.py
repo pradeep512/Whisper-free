@@ -43,6 +43,22 @@ from app.platform import paths as platform_paths
 from app.platform import apply_early_config, platform_init
 
 
+# Rough download sizes (MB) of MLX-format Whisper models on HuggingFace.
+# Used by the first-launch progress dialog to set expectations.
+_MODEL_DOWNLOAD_MB = {
+    'tiny':           75,
+    'base':           145,
+    'small':          470,
+    'medium':         1500,
+    'large':          3000,
+    'large-v3-turbo': 1600,
+}
+
+
+def _estimate_model_mb(model_name: str) -> int:
+    return _MODEL_DOWNLOAD_MB.get(model_name, 500)
+
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -259,10 +275,33 @@ class WhisperFreeApp(QObject):
             device = self.config.get('whisper.device', 'cuda')
             logger.info(f"Loading Whisper model: {model_name} (device hint: {device})")
 
-            self.whisper = create_whisper_engine(
-                model_name=model_name,
-                device=device,
+            # On first launch the model has to be downloaded from HuggingFace
+            # (~75 MB for tiny, ~470 MB for small, up to ~3 GB for large).
+            # That call blocks for up to a few minutes on a slow connection;
+            # show an indeterminate progress dialog so the user knows the app
+            # hasn't hung. If the model is already cached the dialog flashes
+            # briefly (~1 s) and dismisses.
+            init_progress = QProgressDialog(
+                f"Loading Whisper model '{model_name}'…\n"
+                f"On first launch this downloads ~{_estimate_model_mb(model_name)} MB "
+                f"from HuggingFace.",
+                None, 0, 0, None,
             )
+            init_progress.setWindowTitle("Whisper-Free")
+            init_progress.setWindowModality(Qt.ApplicationModal)
+            init_progress.setCancelButton(None)
+            init_progress.setMinimumWidth(380)
+            init_progress.show()
+            self.app.processEvents()   # force a render before we block
+
+            try:
+                self.whisper = create_whisper_engine(
+                    model_name=model_name,
+                    device=device,
+                )
+            finally:
+                init_progress.close()
+
             logger.info(
                 f"Whisper engine ready: {self.whisper!r} "
                 f"(memory: {self.whisper.get_vram_usage():.1f} MB)"
