@@ -20,6 +20,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.theme import (
+    BG, TEXT, TEXT_MUTED, primary_button_qss, secondary_button_qss,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +53,17 @@ class OnboardingWizard(QDialog):
         # Strip the help button (the "?" in the title bar on some platforms).
         flags = self.windowFlags() & ~Qt.WindowContextHelpButtonHint
         self.setWindowFlags(flags)
+
+        # Apply themed dark background so the dialog matches the rest of
+        # the app instead of looking like a Qt-default modal.
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: {BG}; }}
+            QLabel {{ color: {TEXT}; background: transparent; }}
+            QWidget {{
+                font-family: -apple-system, "SF Pro Text", sans-serif;
+                font-size: 13px;
+            }}
+        """)
 
         self.stack = QStackedWidget(self)
         self.stack.addWidget(self._build_mic_step())          # index _STEP_MIC
@@ -84,14 +99,16 @@ class OnboardingWizard(QDialog):
         body.setWordWrap(True)
 
         self.mic_status = QLabel("Not granted yet.")
-        self.mic_status.setStyleSheet("color: #aaa; font-style: italic;")
+        self.mic_status.setStyleSheet(f"color: {TEXT_MUTED}; font-style: italic;")
 
         btn_row = QHBoxLayout()
         skip = QPushButton("Skip", w)
         skip.clicked.connect(lambda: self.stack.setCurrentIndex(_STEP_ACCESSIBILITY))
+        skip.setStyleSheet(secondary_button_qss())
         grant = QPushButton("Request Access", w)
         grant.setDefault(True)
         grant.clicked.connect(self._request_microphone)
+        grant.setStyleSheet(primary_button_qss())
         btn_row.addStretch(1)
         btn_row.addWidget(skip)
         btn_row.addWidget(grant)
@@ -123,14 +140,16 @@ class OnboardingWizard(QDialog):
         body.setTextFormat(Qt.RichText)
 
         self.access_status = QLabel("Waiting for grant…")
-        self.access_status.setStyleSheet("color: #aaa; font-style: italic;")
+        self.access_status.setStyleSheet(f"color: {TEXT_MUTED}; font-style: italic;")
 
         btn_row = QHBoxLayout()
         skip = QPushButton("Skip", w)
         skip.clicked.connect(self._goto_done)
+        skip.setStyleSheet(secondary_button_qss())
         open_btn = QPushButton("Open Settings", w)
         open_btn.setDefault(True)
         open_btn.clicked.connect(self._open_accessibility)
+        open_btn.setStyleSheet(primary_button_qss())
         btn_row.addStretch(1)
         btn_row.addWidget(skip)
         btn_row.addWidget(open_btn)
@@ -158,6 +177,7 @@ class OnboardingWizard(QDialog):
         done = QPushButton("Get started", w)
         done.setDefault(True)
         done.clicked.connect(self._finish)
+        done.setStyleSheet(primary_button_qss())
         btn_row.addStretch(1)
         btn_row.addWidget(done)
 
