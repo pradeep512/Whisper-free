@@ -23,6 +23,7 @@ First-class macOS support alongside the existing Linux build. Same UX, native ma
 
 ### Added — cross-platform
 
+- Fresh **macOS UI screenshots** committed to `assets/macos/` — History, Transcribe (the new 2×2 grid), Batch, Settings (the new 3×2 grid), and the Dynamic Island overlay during recording. Surfaced in `README.md` above the Linux screenshots.
 - Central theme module (`app/ui/theme.py`) with macOS-style coral-orange accent, custom `ModernCheckBox` widget, gradient primary buttons, capsule sidebar selection, system-font stack.
 - Transcribe panel laid out as a 2×2 grid of control cards (Select / Settings / Output Formats / Transcribe) with the Result panel below.
 - Settings panel laid out as a 3×2 grid (Whisper Model / Audio / Hotkey / Overlay / macOS / Advanced).

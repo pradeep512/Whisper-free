@@ -8,6 +8,29 @@ Whisper-Free is a local, privacy-first speech-to-text desktop app with a lightwe
 
 ## Screenshots
 
+### macOS (v1.0.0)
+
+The Dynamic Island overlay shown live during recording (waveform, cancel `×`, stop `■`):
+
+<p align="center">
+  <img src="assets/macos/ui-overlay.png" alt="Dynamic Island overlay during recording" width="640"/>
+</p>
+
+The main window — menu bar agent app with sidebar nav, coral-orange accent, dark theme:
+
+<table>
+  <tr>
+    <td><img src="assets/macos/ui-history.png" width="420" alt="History"/></td>
+    <td><img src="assets/macos/ui-transcribe.png" width="420" alt="Transcribe — 2×2 grid"/></td>
+  </tr>
+  <tr>
+    <td><img src="assets/macos/ui-batch-transcribe.png" width="420" alt="Batch Transcription"/></td>
+    <td><img src="assets/macos/ui-settings.png" width="420" alt="Settings — 3×2 grid"/></td>
+  </tr>
+</table>
+
+### Linux
+
 <table>
   <tr>
     <td><img src="assets/ui-history.png" width="420" alt="Transcription History"/></td>
