@@ -17,7 +17,9 @@ import os
 import sys
 import time
 from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout
-from PySide6.QtGui import QPainter, QColor, QPainterPath, QFont, QFontMetrics, QCursor
+from PySide6.QtGui import (
+    QPainter, QColor, QPainterPath, QPen, QFont, QFontMetrics, QCursor,
+)
 from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QRect, QSize, QPoint,
     QEasingCurve, Signal, QParallelAnimationGroup, Property, QEvent
