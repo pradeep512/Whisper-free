@@ -83,15 +83,16 @@ def _prime_microphone_tcc() -> None:
 
 
 def apply_overlay_window_behavior(widget) -> bool:
-    """Apply macOS-native collection behavior to a Qt widget's NSWindow.
+    """Apply macOS-native always-on-top behavior to a Qt widget's NSWindow.
 
-    Makes the overlay appear:
-      - On every Space (CanJoinAllSpaces) — not just the current desktop.
-      - Above full-screen apps (FullScreenAuxiliary) — Safari, Xcode, etc.
-      - Stationary across Mission Control / Spaces transitions.
-
-    These are the three flags every always-on-top utility uses (Rectangle,
-    Magnet, Bartender, Hammerspoon overlays).
+    Configures the underlying NSWindow so the overlay:
+      - Appears on every Space (CanJoinAllSpaces).
+      - Floats above full-screen apps (FullScreenAuxiliary).
+      - Doesn't follow Mission Control / Spaces transitions (Stationary).
+      - **Stays visible when our app deactivates** (the default Qt.Tool /
+        NSPanel behavior is to auto-hide; we disable it).
+      - **Sits above normal app windows** via NSStatusWindowLevel — so the
+        overlay is visible while the user is typing into another app.
 
     Must be called AFTER the widget has been shown at least once — Qt only
     materializes the backing NSView/NSWindow on first show, so winId()
@@ -110,6 +111,7 @@ def apply_overlay_window_behavior(widget) -> bool:
             NSWindowCollectionBehaviorCanJoinAllSpaces,
             NSWindowCollectionBehaviorFullScreenAuxiliary,
             NSWindowCollectionBehaviorStationary,
+            NSStatusWindowLevel,
         )
     except ImportError:
         logger.warning(
@@ -141,9 +143,28 @@ def apply_overlay_window_behavior(widget) -> bool:
             | NSWindowCollectionBehaviorStationary
         )
         ns_window.setCollectionBehavior_(behavior)
+
+        # Keep the panel visible when our app loses focus. Qt.Tool maps to
+        # NSPanel and NSPanel.hidesOnDeactivate defaults to YES — that's
+        # what makes the overlay disappear when you click into another app.
+        try:
+            ns_window.setHidesOnDeactivate_(False)
+        except Exception as e:
+            # setHidesOnDeactivate is an NSPanel selector; if Qt happened
+            # to back the widget with a plain NSWindow this will fail —
+            # silently fine (NSWindow doesn't auto-hide anyway).
+            logger.debug(f"setHidesOnDeactivate_ skipped: {e}")
+
+        # Float above normal app windows so the overlay is visible while
+        # the user is typing into another app. NSStatusWindowLevel == 25,
+        # which is above NSFloatingWindowLevel (3) and below NSPopUpMenu
+        # — about the same level Spotlight and Bartender use.
+        ns_window.setLevel_(NSStatusWindowLevel)
+
         logger.info(
-            "Applied NSWindow collection behavior to overlay: "
-            "CanJoinAllSpaces | FullScreenAuxiliary | Stationary"
+            "Applied NSWindow behavior to overlay: AllSpaces + "
+            "FullScreenAuxiliary + Stationary + !hidesOnDeactivate + "
+            "StatusWindowLevel"
         )
         return True
     except Exception as e:
