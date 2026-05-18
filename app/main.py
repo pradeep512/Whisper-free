@@ -1139,6 +1139,19 @@ def main():
 
     Default: launch the full app.
     """
+    # CRITICAL for PyInstaller-frozen apps on macOS: when our transitive
+    # deps (huggingface_hub parallel downloads, joblib via librosa, etc.)
+    # use multiprocessing, the default 'spawn' start method re-executes
+    # the bundled binary for each child process. Without freeze_support(),
+    # each child re-runs WhisperFreeApp.__init__ (re-loads the model,
+    # re-registers the menu bar tray, …) and spawns its own children,
+    # cascading into an OOM fork bomb within seconds.
+    # freeze_support() short-circuits child processes so they execute
+    # only their multiprocessing duties and exit. It's a no-op when
+    # running from source.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     if '--ipc-toggle' in sys.argv:
         sys.exit(_handle_ipc_toggle_and_exit())
 
