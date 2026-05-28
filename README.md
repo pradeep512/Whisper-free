@@ -124,8 +124,6 @@ Whisper-Free uses `PySide6`, which bundles Qt for Python and Qt runtime librarie
 - Third-party notices for bundled Qt / PySide6 material are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Canonical LGPL/GPL license texts used for notice packaging are included in [licenses/README.md](licenses/README.md).
 
-For the current compliance review and risk summary, see [LGPL_COMPLIANCE_REVIEW_2026-05-28.md](LGPL_COMPLIANCE_REVIEW_2026-05-28.md).
-
 ## Wayland Note (GNOME)
 
 On GNOME Wayland, precise overlay positioning is restricted. To keep the overlay pinned to the top-center, Whisper-Free automatically runs via XWayland when it detects Wayland.
