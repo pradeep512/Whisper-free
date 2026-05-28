@@ -7,12 +7,18 @@ from pathlib import Path
 ROOT = Path(SPECPATH).resolve().parents[1]
 
 whisper_datas = collect_data_files('whisper')
+notice_datas = [
+    (str(ROOT / 'THIRD_PARTY_NOTICES.md'), 'licenses'),
+    (str(ROOT / 'licenses' / 'README.md'), 'licenses'),
+    (str(ROOT / 'licenses' / 'LGPL-3.0.txt'), 'licenses'),
+    (str(ROOT / 'licenses' / 'GPL-3.0.txt'), 'licenses'),
+]
 
 a = Analysis(
     [str(ROOT / 'app' / 'main.py')],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=whisper_datas,
+    datas=whisper_datas + notice_datas,
     hiddenimports=[
         'pynput.keyboard._xorg',
         'pynput.mouse._xorg',

@@ -130,6 +130,9 @@ if [ ! -d "$APP" ]; then
     exit 1
 fi
 
+echo "==> Pruning unused Qt runtime components..."
+"$ROOT/scripts/prune_qt_bundle.sh" "$APP"
+
 # --- Bundle audits -----------------------------------------------------------
 
 APP_SIZE_HUMAN="$(du -sh "$APP" | cut -f1)"
@@ -159,6 +162,9 @@ fi
 if find "$APP" -name 'libtorch*' -o -name 'torch' 2>/dev/null | grep -q .; then
     echo "  ⚠ torch detected in bundle — excludes in spec may be off" >&2
 fi
+
+echo "==> Auditing bundled Qt runtime..."
+"$ROOT/scripts/audit_qt_bundle.sh" "$APP"
 
 # --- Build DMG ---------------------------------------------------------------
 
