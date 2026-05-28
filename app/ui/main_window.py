@@ -254,10 +254,17 @@ class MainWindow(QMainWindow):
         description.setAlignment(Qt.AlignmentFlag.AlignCenter)
         description.setWordWrap(True)
 
-        # License
-        license_label = QLabel("MIT License")
+        # License / notice summary. Do not imply the entire distributed app is
+        # covered by a single in-house license when third-party runtime
+        # components are bundled.
+        license_label = QLabel(
+            "Whisper-Free app code: MIT License.\n"
+            "PySide6 / Qt runtime components are distributed under their own licenses.\n"
+            "See THIRD_PARTY_NOTICES.md and licenses/ for details."
+        )
         license_label.setStyleSheet(f"font-size: 11px; color: {TEXT_MUTED}; margin-top: 16px;")
         license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        license_label.setWordWrap(True)
 
         layout.addStretch()
         layout.addWidget(title)

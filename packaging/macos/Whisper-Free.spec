@@ -26,6 +26,48 @@ assert sys.platform == 'darwin', \
 # packaging/macos/, so parents[1] is the repo root.
 ROOT = Path(SPECPATH).resolve().parents[1]
 
+
+def _filter_unneeded_qt_artifacts(toc):
+    """Drop Qt runtime pieces that Whisper-Free does not use."""
+    blocked_exact = {
+        'QtPdf',
+        'QtQml',
+        'QtQmlMeta',
+        'QtQmlModels',
+        'QtQmlWorkerScript',
+        'QtQuick',
+        'QtVirtualKeyboard',
+        'QtVirtualKeyboardQml',
+    }
+    blocked_prefixes = (
+        'PySide6/Qt/lib/QtPdf.framework',
+        'PySide6/Qt/lib/QtQml.framework',
+        'PySide6/Qt/lib/QtQmlMeta.framework',
+        'PySide6/Qt/lib/QtQmlModels.framework',
+        'PySide6/Qt/lib/QtQmlWorkerScript.framework',
+        'PySide6/Qt/lib/QtQuick.framework',
+        'PySide6/Qt/lib/QtVirtualKeyboard.framework',
+        'PySide6/Qt/lib/QtVirtualKeyboardQml.framework',
+        'PySide6/Qt/plugins/imageformats/libqpdf.dylib',
+        'PySide6/Qt/plugins/platforminputcontexts/libqtvirtualkeyboardplugin.dylib',
+    )
+
+    filtered = []
+    removed = []
+    for entry in toc:
+        dest_name = entry[0]
+        if dest_name in blocked_exact or any(dest_name.startswith(prefix) for prefix in blocked_prefixes):
+            removed.append(dest_name)
+            continue
+        filtered.append(entry)
+
+    if removed:
+        print("Pruned unused Qt artifacts from bundle:")
+        for name in sorted(set(removed)):
+            print(f"  - {name}")
+
+    return toc.__class__(filtered)
+
 # ---------------------------------------------------------------------------
 # Collect platform-specific data files and dynamic libraries.
 # ---------------------------------------------------------------------------
@@ -45,6 +87,10 @@ pyobjc_binaries = (
 asset_datas = [
     (str(ROOT / 'assets' / 'app-icon.png'), 'assets'),
     (str(ROOT / 'assets' / 'app-icon-512.png'), 'assets'),
+    (str(ROOT / 'THIRD_PARTY_NOTICES.md'), 'licenses'),
+    (str(ROOT / 'licenses' / 'README.md'), 'licenses'),
+    (str(ROOT / 'licenses' / 'LGPL-3.0.txt'), 'licenses'),
+    (str(ROOT / 'licenses' / 'GPL-3.0.txt'), 'licenses'),
     # CLI shim — bundled at Contents/Resources/whisper-free so the Homebrew
     # Cask can symlink /opt/homebrew/bin/whisper-free -> it. Executable bit
     # is restored in the cask's postflight (PyInstaller drops perms on
@@ -93,6 +139,8 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+a.binaries = _filter_unneeded_qt_artifacts(a.binaries)
+a.datas = _filter_unneeded_qt_artifacts(a.datas)
 pyz = PYZ(a.pure)
 
 exe = EXE(
