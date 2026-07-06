@@ -28,6 +28,7 @@ coverage.xml
 *.cover
 *.log
 .pytest_cache/
+.mypy_cache/
 
 # IDEs
 .vscode/
