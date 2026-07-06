@@ -39,13 +39,30 @@ def compute_type_for(device: str) -> str:
     return "float16" if device == "cuda" else "int8"
 
 
+def resolve_effective_device(requested: Optional[str] = None) -> str:
+    """Resolve the device to actually use, given a caller-requested hint.
+
+    'cpu' is always honored exactly — it's the explicit override Settings
+    exposes to force CPU. Anything else (None, 'cuda', 'auto') auto-detects:
+    CUDA if an NVIDIA GPU is available, else CPU. This matters because
+    `whisper.device` defaults to 'cuda' (a Linux-era default shared across
+    platforms) — most Windows machines have no NVIDIA GPU, so a bare 'cuda'
+    request must degrade to CPU rather than fail to load the model.
+    """
+    if requested == "cpu":
+        return "cpu"
+    return resolve_device()
+
+
 class WhisperEngineFasterWhisper:
     """Windows Whisper backend (faster-whisper / CTranslate2).
 
     Differences vs the Linux torch WhisperEngine that callers should be
     aware of:
     - `device` defaults to auto-detected CUDA-or-CPU rather than requiring
-      the caller to pick; pass device='cpu' to force CPU.
+      the caller to pick; pass device='cpu' to force CPU. A 'cuda' request
+      with no GPU present degrades to CPU (with a warning) instead of
+      raising, since `whisper.device` shares Linux's 'cuda' default.
     - VRAM reporting is best-effort (CTranslate2 doesn't expose a precise
       per-model VRAM counter the way torch does); returns 0.0 when unknown.
     """
@@ -75,7 +92,12 @@ class WhisperEngineFasterWhisper:
         except Exception as e:
             logger.warning(f"Could not set HF_HOME: {e}")
 
-        self.device = device or resolve_device()
+        self.device = resolve_effective_device(device)
+        if device == "cuda" and self.device == "cpu":
+            logger.warning(
+                "whisper.device='cuda' requested but no NVIDIA GPU was detected; "
+                "falling back to CPU"
+            )
         self.compute_type = compute_type_for(self.device)
         self.model_name: Optional[str] = None
         self.model = None
