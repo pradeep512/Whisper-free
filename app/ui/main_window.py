@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
     settings_changed = Signal()  # Emitted when user saves settings
     ptt_toggle_requested = Signal()  # Emitted when user clicks PTT button
     exit_requested = Signal()  # Emitted when user closes the window
+    hide_to_tray_requested = Signal()  # Emitted when the window is hidden to the tray (Windows)
 
     def __init__(self, db_manager, config_manager, whisper_engine=None, queue_manager=None):
         """
@@ -96,10 +97,20 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """
-        Hide immediately for instant UI close, then request app shutdown.
+        Hide immediately for instant UI close.
+
+        On Windows, the tray icon keeps the app (and the global hotkey)
+        running in the background, so closing the window hides it to the
+        tray instead of quitting — quitting is explicit via the tray menu.
+        Linux/macOS keep the original behavior: closing the window requests
+        app shutdown.
         """
+        import sys
         self.hide()
-        self.exit_requested.emit()
+        if sys.platform == 'win32':
+            self.hide_to_tray_requested.emit()
+        else:
+            self.exit_requested.emit()
         event.ignore()
 
     def _setup_ui(self):

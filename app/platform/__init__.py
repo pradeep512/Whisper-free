@@ -87,6 +87,9 @@ def platform_init(app) -> None:
         except ImportError:
             # macOS-specific deps not installed; degrade gracefully.
             pass
+    elif sys.platform == 'win32':
+        from app.platform.windows import init as windows_init
+        windows_init.init_windows(app)
     # Linux currently has nothing extra to do at init time.
 
 
