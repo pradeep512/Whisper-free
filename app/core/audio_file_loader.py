@@ -76,6 +76,21 @@ class AudioFileLoader:
     FFMPEG_FORMATS = ['.mp3', '.m4a', '.opus', '.webm']
 
     @staticmethod
+    def get_dialog_filter() -> str:
+        """
+        Build the shared file-dialog filter string for Media files (audio
+        and video), derived from SUPPORTED_FORMATS so every panel offers
+        the same formats as the loader actually accepts. Includes an
+        "All Files" escape hatch for exotic containers.
+
+        Returns:
+            A Qt QFileDialog-style filter string, e.g.
+            "Media Files (*.mp3 *.wav ... *.mp4 ...);;All Files (*.*)"
+        """
+        patterns = " ".join(f"*{fmt}" for fmt in AudioFileLoader.SUPPORTED_FORMATS)
+        return f"Media Files ({patterns});;All Files (*.*)"
+
+    @staticmethod
     def is_video(file_path: str) -> bool:
         """
         Check whether a file should be decoded via the video (ffmpeg

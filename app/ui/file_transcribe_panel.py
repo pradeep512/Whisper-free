@@ -396,10 +396,9 @@ class FileTranscribePanel(QWidget):
         # Get last directory from config
         last_dir = self.config.get('file_transcribe.last_directory', str(Path.home()))
 
-        # Create filter string from supported formats
-        formats = AudioFileLoader.SUPPORTED_FORMATS
-        format_patterns = " ".join([f"*{fmt}" for fmt in formats])
-        filter_str = f"Media Files ({format_patterns});;All Files (*.*)"
+        # Shared filter string (audio + video), derived from the loader's
+        # format lists - see AudioFileLoader.get_dialog_filter().
+        filter_str = AudioFileLoader.get_dialog_filter()
 
         # Open file dialog
         file_path, _ = QFileDialog.getOpenFileName(

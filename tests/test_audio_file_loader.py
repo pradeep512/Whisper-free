@@ -249,6 +249,36 @@ def test_extract_and_load_deletes_temp_wav_when_load_step_fails(tmp_path, monkey
     assert not Path(created_paths[0]).exists(), "temp wav must be removed even if load fails"
 
 
+# ---------------------------------------------------------------------------
+# Shared dialog-filter helper (#26): one "Media Files (...)" filter string
+# covering audio + video, consumed by both the single-file and Batch panels.
+# ---------------------------------------------------------------------------
+
+
+def test_get_dialog_filter_covers_audio_and_video_with_all_files_option():
+    filter_str = AudioFileLoader.get_dialog_filter()
+
+    assert filter_str.startswith("Media Files (")
+    assert filter_str.endswith(";;All Files (*.*)")
+
+    for ext in AudioFileLoader.AUDIO_FORMATS:
+        assert f"*{ext}" in filter_str
+    for ext in AudioFileLoader.VIDEO_FORMATS:
+        assert f"*{ext}" in filter_str
+
+
+def test_get_dialog_filter_matches_supported_formats_exactly():
+    # No hardcoded duplicate: the filter must be derived from
+    # SUPPORTED_FORMATS, not some other hand-maintained list.
+    filter_str = AudioFileLoader.get_dialog_filter()
+    media_section = filter_str.split(";;")[0]
+
+    expected_patterns = {f"*{fmt}" for fmt in AudioFileLoader.SUPPORTED_FORMATS}
+    actual_patterns = set(media_section[len("Media Files ("):-1].split(" "))
+
+    assert actual_patterns == expected_patterns
+
+
 def test_load_audio_dispatches_video_files_to_extractor(tmp_path, monkeypatch):
     video_path = tmp_path / "input.mp4"
     video_path.write_bytes(b"fake video bytes")
