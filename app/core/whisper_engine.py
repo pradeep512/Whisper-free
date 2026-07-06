@@ -421,6 +421,9 @@ def get_engine_class():
     if sys.platform == 'darwin':
         from app.core.whisper_engine_mlx import WhisperEngineMLX
         return WhisperEngineMLX
+    if sys.platform == 'win32':
+        from app.core.whisper_engine_faster_whisper import WhisperEngineFasterWhisper
+        return WhisperEngineFasterWhisper
     return WhisperEngine
 
 
@@ -443,6 +446,7 @@ def create_whisper_engine(model_name: str = "small", device: Optional[str] = Non
     """Build the right Whisper engine for this platform.
 
     On macOS (Apple Silicon): returns a WhisperEngineMLX (mlx-whisper backend).
+    On Windows: returns a WhisperEngineFasterWhisper (CTranslate2 backend).
     On Linux / everywhere else: returns a WhisperEngine (torch backend).
 
     Args:
@@ -450,7 +454,8 @@ def create_whisper_engine(model_name: str = "small", device: Optional[str] = Non
             but the common subset (tiny/base/small/medium/large-v3-turbo) works
             on both.
         device: Backend-specific device hint. Ignored on macOS (always mlx).
-            On Linux: 'cuda' (default) or 'cpu'.
+            On Linux: 'cuda' (default) or 'cpu'. On Windows: 'cuda' or 'cpu',
+            or None to auto-detect (default).
 
     Returns:
         An engine instance exposing the WhisperEngine public API:
@@ -468,6 +473,16 @@ def create_whisper_engine(model_name: str = "small", device: Optional[str] = Non
             f"create_whisper_engine: using MLX backend on macOS for '{model_name}'"
         )
         return WhisperEngineMLX(model_name=model_name)
+
+    if sys.platform == 'win32':
+        # Windows — use faster-whisper (CTranslate2), which auto-detects CUDA
+        # vs CPU unless the caller overrides `device`.
+        from app.core.whisper_engine_faster_whisper import WhisperEngineFasterWhisper
+        logger.info(
+            f"create_whisper_engine: using faster-whisper backend on Windows "
+            f"for '{model_name}'"
+        )
+        return WhisperEngineFasterWhisper(model_name=model_name, device=device)
 
     # Linux / other Unix — use the torch backend.
     resolved_device = device or 'cuda'

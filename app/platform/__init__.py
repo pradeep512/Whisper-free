@@ -5,7 +5,8 @@ Call sites import from this module without caring about the OS:
     from app.platform import paths
     config = paths.config_file()
 
-The actual implementation is in app.platform.linux or app.platform.macos.
+The actual implementation is in app.platform.linux, app.platform.macos, or
+app.platform.windows.
 """
 import sys
 
@@ -17,10 +18,15 @@ elif sys.platform.startswith('linux'):
     from app.platform.linux import paths
     from app.platform.linux import hotkey_perms
     from app.platform.linux import autolaunch
+elif sys.platform == 'win32':
+    # Windows has no autolaunch/tray submodule yet (tracked separately);
+    # hotkey_perms + paths are enough for first-light launch + transcription.
+    from app.platform.windows import paths
+    from app.platform.windows import hotkey_perms
 else:
     raise RuntimeError(
         f"Unsupported platform: {sys.platform}. "
-        "Whisper-Free supports Linux and macOS (Apple Silicon) only."
+        "Whisper-Free supports Linux, macOS (Apple Silicon), and Windows."
     )
 
 

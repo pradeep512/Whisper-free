@@ -1,0 +1,13 @@
+# Windows-only dependencies for Whisper-Free (faster-whisper / CTranslate2 path).
+# Install with: pip install -r requirements-windows.txt
+
+-r requirements-base.txt
+
+# Whisper backend (faster-whisper + CTranslate2)
+faster-whisper>=1.0.0
+
+# NVIDIA CUDA runtime (cuBLAS/cuDNN) for the GPU path. CPU-only machines
+# still work fine without a GPU present; these wheels just make the DLLs
+# resolvable from source runs when one is.
+nvidia-cublas-cu12>=12.0
+nvidia-cudnn-cu12>=9.0
