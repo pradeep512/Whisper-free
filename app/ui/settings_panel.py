@@ -628,8 +628,20 @@ class SettingsPanel(QWidget):
             if sys.platform == 'win32':
                 cb = self.widgets.get('windows.open_at_login')
                 if cb is not None:
+                    # Read the actual registry state rather than the persisted
+                    # config value, so the checkbox can't drift out of sync if
+                    # the Run key is removed outside the app (e.g. by AV or a
+                    # manual edit).
+                    try:
+                        from app.platform.windows.autolaunch import (
+                            is_open_at_login_enabled,
+                        )
+                        enabled = is_open_at_login_enabled()
+                    except Exception as e:
+                        logger.error(f"Could not read Open at Login state: {e}")
+                        enabled = self.config.get('windows.open_at_login', False)
                     cb.blockSignals(True)
-                    cb.setChecked(self.config.get('windows.open_at_login', False))
+                    cb.setChecked(enabled)
                     cb.blockSignals(False)
 
             # Advanced
