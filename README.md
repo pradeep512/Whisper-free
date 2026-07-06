@@ -68,6 +68,12 @@ The main window — menu bar agent app with sidebar nav, coral-orange accent, da
 - FFmpeg (required for MP3/M4A/WebM file transcription)
 - ~500 MB free disk space for the app + default `small` model
 
+**Windows**
+- Windows 10 or 11, 64-bit
+- Python 3.11 (only needed for source builds)
+- NVIDIA GPU optional — accelerates transcription via CUDA when present; CPU (int8) is used automatically otherwise
+- Disk space for the app + default `small` model (a few hundred MB; more if you install the bundled CUDA runtime)
+
 ## Install using git repo
 
 ```bash
@@ -84,7 +90,12 @@ pip install -r requirements-linux.txt
 
 # 3) ...or install deps (macOS, Apple Silicon)
 pip install -r requirements-macos.txt
+
+# 3) ...or install deps (Windows)
+pip install -r requirements-windows.txt
 ```
+
+On Windows, use `py -3.11 -m venv venv` and `venv\Scripts\Activate.ps1` instead of the venv commands above.
 
 Install ffmpeg if you plan to transcribe MP3/M4A/WebM:
 
@@ -95,6 +106,8 @@ sudo apt-get install ffmpeg
 # macOS
 brew install ffmpeg
 ```
+
+On Windows, the installer bundles `ffmpeg.exe` — no separate install needed. For source runs, download a static build from https://www.gyan.dev/ffmpeg/builds/ and put `ffmpeg.exe` on `PATH`.
 
 ## Run
 
@@ -176,21 +189,27 @@ For known issues being tracked for the v1.0.0 macOS release, see [KNOWN_ISSUES.m
 - **macOS** — Hotkey doesn't fire: System Settings → Privacy & Security → Accessibility → ensure Whisper-Free is listed and enabled. Re-add it if you replaced the app binary (Mac invalidates the entry on signature change).
 - **macOS** — Microphone prompt didn't appear: open System Settings → Privacy & Security → Microphone → toggle Whisper-Free on. The system only prompts once per binary path.
 - **macOS** — App "is damaged" error: this is Gatekeeper on a quarantined binary. Run `xattr -d com.apple.quarantine /Applications/Whisper-Free.app`, then re-launch.
+- **Windows** — SmartScreen blocks the installer: click **More info** → **Run anyway**. The installer is unsigned (see [Install on Windows](#install-on-windows)).
+- **Windows** — MP3/M4A won't load from a source run: install ffmpeg and put `ffmpeg.exe` on `PATH` (the packaged installer bundles it, so this only affects source runs).
 
 ## Project Layout
 
 - `app/` main application code
-  - `app/platform/{linux,macos}/` platform-specific shims (paths, hotkey perms, tray icon, autolaunch)
+  - `app/platform/{linux,macos,windows}/` platform-specific shims (paths, hotkey perms, tray icon, autolaunch)
   - `app/ui/overlay.py` overlay UI
   - `app/ui/onboarding_wizard.py` first-launch permission wizard (macOS)
   - `app/core/whisper_engine.py` PyTorch backend (Linux: CUDA / CPU)
   - `app/core/whisper_engine_mlx.py` MLX backend (macOS: Apple Silicon)
+  - `app/core/whisper_engine_faster_whisper.py` faster-whisper/CTranslate2 backend (Windows: CUDA / CPU)
 - `scripts/whisper` CLI entry point (Linux)
 - `scripts/whisper-free` CLI entry point (macOS)
 - `scripts/build_macos.sh` one-shot macOS build script
+- `scripts/build_windows.ps1` one-shot Windows build script (PyInstaller bundle + Inno Setup installer)
 - `packaging/appimage/` AppImage build artifacts (Linux)
 - `packaging/macos/` PyInstaller spec + hooks (macOS)
 - `packaging/homebrew/` Homebrew Cask formula
+- `packaging/windows/` PyInstaller spec + Inno Setup installer script (Windows)
+- `requirements-windows.txt` Windows dependencies (faster-whisper, NVIDIA CUDA runtime wheels)
 - `assets/` icon, screenshots, demo video
 - `docs/` ARCHITECTURE, MACOS_PORT, BUILD_MACOS reference docs
 
@@ -306,6 +325,51 @@ pip install -r requirements-macos.txt
 ```
 
 Outputs land in `dist/Whisper-Free.app` and `dist/Whisper-Free-<version>.dmg`. See `docs/BUILD_MACOS.md` for the full runbook.
+
+## Install on Windows
+
+Whisper-Free on Windows runs as a hybrid tray app (a real window plus a resident tray icon) and uses **faster-whisper** for transcription — fast on CPU, and automatically accelerated on an NVIDIA GPU with no configuration.
+
+### Download the installer
+
+1. Download `Whisper-Free-Setup-<version>.exe` from the [Releases page](https://github.com/pradeep512/Whisper-free/releases).
+2. Run it. It installs per-user to `%LOCALAPPDATA%\Programs\Whisper-Free` — **no admin rights and no UAC prompt required**.
+3. A Start Menu shortcut (and optional desktop icon) is created, along with an "Open Whisper-Free at login" option you can enable during install or later in Settings.
+
+### First launch: SmartScreen note
+
+The installer is currently **unsigned** (matching the macOS release posture), so Windows SmartScreen may show:
+
+> *Windows protected your PC — Microsoft Defender SmartScreen prevented an unrecognized app from starting.*
+
+Click **More info**, then **Run anyway**. This appears once per downloaded file.
+
+### First launch: model download
+
+On first run, Whisper-Free downloads the default `small` Whisper model (CTranslate2 format) to your local app data folder. This requires an internet connection the first time; subsequent launches use the cached model.
+
+### Using Whisper-Free on Windows
+
+- **Main window**: shown on launch. Closing it hides the app to the tray (it keeps running so the hotkey stays live); quit explicitly via the tray's right-click menu.
+- **Tray icon**: left-click toggles recording; right-click gives "Open Window" and "Quit".
+- **Hotkey**: defaults to **Ctrl+Space**, reconfigurable in *Settings → Hotkey*.
+- **Open at login**: toggle in *Settings → Windows → Open Whisper-Free at login*.
+- **Compute device**: auto-detects an NVIDIA GPU (CUDA) and falls back to CPU (int8) otherwise; override via the `whisper.device` config key if needed.
+
+### Build the installer yourself (from source)
+
+```powershell
+# Prerequisites
+py -3.11 -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements-windows.txt
+
+# Place a Windows ffmpeg.exe at packaging/windows/ffmpeg.exe (see the script's
+# header for download options), then build the bundle + installer:
+./scripts/build_windows.ps1
+```
+
+This produces `dist/Whisper-Free/` (a PyInstaller onedir bundle) and, if [Inno Setup](https://jrsoftware.org/isinfo.php) is installed, `dist/installer/Whisper-Free-Setup-<version>.exe`. See `scripts/build_windows.ps1`'s header comment for the full prerequisites and options.
 
 ## License
 
