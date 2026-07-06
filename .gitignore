@@ -1,3 +1,6 @@
+# Ralph agent-loop harness (local only, not tracked)
+ralph/
+
 # User requested to exclude docs
 docs/
 
