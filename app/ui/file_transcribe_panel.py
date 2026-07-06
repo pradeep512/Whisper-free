@@ -1,7 +1,7 @@
 """
-FileTranscribePanel - UI for transcribing audio files
+FileTranscribePanel - UI for transcribing Media files (audio or video)
 
-Provides interface to select audio files, transcribe them using Whisper,
+Provides interface to select Media files, transcribe them using Whisper,
 and save transcriptions as .txt files. Shows progress and results.
 
 Author: Whisper-Free Project
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class FileTranscribePanel(QWidget):
     """
-    Panel for transcribing audio files.
+    Panel for transcribing Media files (audio and video).
 
     Features:
     - File selection with format filter
@@ -80,7 +80,7 @@ class FileTranscribePanel(QWidget):
 
         Top section: 2x2 grid of the four control cards.
             ┌──────────────────┬──────────────────┐
-            │ Select Audio File│ Transcription    │
+            │ Select Media File│ Transcription    │
             │                  │ Settings         │
             ├──────────────────┼──────────────────┤
             │ Output Formats   │ Transcribe       │
@@ -133,7 +133,7 @@ class FileTranscribePanel(QWidget):
         """Create file selection section."""
         from app.ui.theme import TEXT, TEXT_MUTED
 
-        group = QGroupBox("Select Audio File")
+        group = QGroupBox("Select Media File")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)
@@ -399,12 +399,12 @@ class FileTranscribePanel(QWidget):
         # Create filter string from supported formats
         formats = AudioFileLoader.SUPPORTED_FORMATS
         format_patterns = " ".join([f"*{fmt}" for fmt in formats])
-        filter_str = f"Audio Files ({format_patterns});;All Files (*.*)"
+        filter_str = f"Media Files ({format_patterns});;All Files (*.*)"
 
         # Open file dialog
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Audio File",
+            "Select Media File",
             last_dir,
             filter_str
         )
@@ -799,7 +799,7 @@ class FileTranscribePanel(QWidget):
         QMessageBox.critical(
             self,
             "Transcription Failed",
-            f"Failed to transcribe audio file:\n\n{error_message}"
+            f"Failed to transcribe Media file:\n\n{error_message}"
         )
 
     def _cleanup_worker(self):
