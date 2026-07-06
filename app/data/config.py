@@ -204,13 +204,21 @@ class ConfigManager:
                     allow_unicode=True
                 )
 
-            # Atomic rename
-            Path(temp_path).rename(self.config_path)
+            # Atomic replace. Path.replace() (os.replace) overwrites an
+            # existing destination atomically on BOTH POSIX and Windows;
+            # Path.rename() would raise FileExistsError on Windows when the
+            # config file already exists, breaking every save after the first.
+            Path(temp_path).replace(self.config_path)
 
             logger.info(f"Config saved to {self.config_path}")
 
         except (IOError, OSError) as e:
             logger.error(f"Error saving config: {e}")
+            # Don't leave the temp file behind on failure.
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
             raise RuntimeError(f"Failed to save configuration: {e}")
 
     def save(self) -> None:
