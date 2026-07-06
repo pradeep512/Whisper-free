@@ -19,10 +19,9 @@ elif sys.platform.startswith('linux'):
     from app.platform.linux import hotkey_perms
     from app.platform.linux import autolaunch
 elif sys.platform == 'win32':
-    # Windows has no autolaunch/tray submodule yet (tracked separately);
-    # hotkey_perms + paths are enough for first-light launch + transcription.
     from app.platform.windows import paths
     from app.platform.windows import hotkey_perms
+    from app.platform.windows import autolaunch
 else:
     raise RuntimeError(
         f"Unsupported platform: {sys.platform}. "

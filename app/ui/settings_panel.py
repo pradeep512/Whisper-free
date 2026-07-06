@@ -107,6 +107,8 @@ class SettingsPanel(QWidget):
         self.setting_groups.append(self._create_overlay_group())
         if sys.platform == 'darwin':
             self.setting_groups.append(self._create_macos_group())
+        if sys.platform == 'win32':
+            self.setting_groups.append(self._create_windows_group())
         self.setting_groups.append(self._create_advanced_group())
 
         # Initial layout
@@ -450,6 +452,49 @@ class SettingsPanel(QWidget):
         except Exception as e:
             logger.error(f"Could not persist macos.show_in_dock: {e}")
 
+    def _create_windows_group(self) -> QGroupBox:
+        """Create the Windows-only settings group.
+
+        Applies immediately (not on Save) since its effect (registry Run
+        key) is immediately in force, matching the macOS toggle pattern.
+        """
+        group = QGroupBox("Windows")
+        group.setStyleSheet(self._group_style())
+
+        form = QFormLayout(group)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
+
+        open_at_login_cb = ModernCheckBox("Open Whisper-Free at login")
+        open_at_login_cb.setStyleSheet("color: #cccccc;")
+        open_at_login_cb.setToolTip(
+            "Start Whisper-Free automatically when you sign in to Windows."
+        )
+        open_at_login_cb.stateChanged.connect(self._on_windows_open_at_login_toggled)
+        self.widgets['windows.open_at_login'] = open_at_login_cb
+        form.addRow("", open_at_login_cb)
+
+        return group
+
+    def _on_windows_open_at_login_toggled(self, state) -> None:
+        """Apply + persist Open-at-Login immediately."""
+        from PySide6.QtCore import Qt as _Qt
+        enabled = (state == _Qt.CheckState.Checked.value) or (state == _Qt.Checked)
+        try:
+            from app.platform import autolaunch
+            ok = autolaunch.set_open_at_login(enabled)
+            if not ok:
+                logger.warning(
+                    f"Open at Login {'enable' if enabled else 'disable'} failed."
+                )
+        except Exception as e:
+            logger.error(f"Open at Login toggle failed: {e}")
+        try:
+            self.config.set('windows.open_at_login', enabled)
+            self.config.save()
+        except Exception as e:
+            logger.error(f"Could not persist windows.open_at_login: {e}")
+
     def _create_advanced_group(self) -> QGroupBox:
         """Create Advanced settings group"""
         group = QGroupBox("Advanced")
@@ -578,6 +623,14 @@ class SettingsPanel(QWidget):
                         cb.blockSignals(True)
                         cb.setChecked(self.config.get(key, False))
                         cb.blockSignals(False)
+
+            # Windows (only created on win32)
+            if sys.platform == 'win32':
+                cb = self.widgets.get('windows.open_at_login')
+                if cb is not None:
+                    cb.blockSignals(True)
+                    cb.setChecked(self.config.get('windows.open_at_login', False))
+                    cb.blockSignals(False)
 
             # Advanced
             self.widgets['whisper.fp16'].setChecked(
