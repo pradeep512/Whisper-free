@@ -532,8 +532,27 @@ class WhisperFreeApp(QObject):
         logger.info(f"IPC command: {command}")
         if command == "toggle":
             self.on_hotkey_pressed()
+        elif command == "focus":
+            self._focus_main_window()
         else:
             logger.warning(f"Unknown IPC command: {command}")
+
+    def _focus_main_window(self):
+        """Restore and raise the main window.
+
+        Used by the Windows single-instance guard (issue #17): a second
+        launch sends "focus" over IPC instead of starting a duplicate
+        process, and the surviving instance brings its window to front.
+        """
+        try:
+            if self.main_window.isMinimized():
+                self.main_window.showNormal()
+            else:
+                self.main_window.show()
+            self.main_window.raise_()
+            self.main_window.activateWindow()
+        except Exception as e:
+            logger.error(f"Failed to focus main window: {e}")
 
     def start_recording(self):
         """Begin audio capture (non-blocking)"""
@@ -1073,6 +1092,19 @@ class WhisperFreeApp(QObject):
         except:
             pass
 
+        # Stop the history panel's debounced reload timer before closing the
+        # database. Otherwise a pending 300ms singleShot reload can fire after
+        # the DB is closed, its query raises, and _perform_reload pops a modal
+        # QMessageBox that blocks the event loop forever (harmless when the
+        # process is exiting, but it hangs any later QApplication.processEvents()
+        # in a long-lived process such as the pytest session).
+        try:
+            history_panel = getattr(self.main_window, 'history_panel', None)
+            if history_panel is not None and hasattr(history_panel, 'reload_timer'):
+                history_panel.reload_timer.stop()
+        except Exception:
+            pass
+
         # Close database
         try:
             self.db.close()
@@ -1130,12 +1162,47 @@ def _handle_ipc_toggle_and_exit() -> int:
     return 1
 
 
+def _try_focus_running_instance() -> bool:
+    """Windows single-instance guard (issue #17).
+
+    If another Whisper-Free instance is already listening on the IPC
+    channel, ask it to restore/focus its window and report True so the
+    caller can exit instead of starting a duplicate process (duplicate
+    tray icon, conflicting hotkey registration).
+
+    Deliberately does NOT construct a QCoreApplication here: QLocalSocket's
+    blocking waitForConnected()/waitForBytesWritten() calls work fine with
+    no QCoreApplication instance in the process at all (verified against
+    real Windows named pipes), and constructing a throwaway one would leak
+    a QCoreApplication singleton into the process when nothing is running
+    — which then breaks `WhisperFreeApp.__init__`'s `QApplication.instance()`
+    call (it would get back that leftover QCoreApplication instead of None,
+    and QCoreApplication has no `setQuitOnLastWindowClosed`, crashing every
+    first-launch-with-nothing-running case). If a QCoreApplication/
+    QApplication already exists in-process (e.g. under test, or a future
+    caller), send_ipc_command() reuses it as the socket's parent; otherwise
+    the socket is simply unparented.
+
+    Returns:
+        True if a running instance was signaled, False otherwise.
+    """
+    from app.core.ipc_server import send_ipc_command
+
+    return send_ipc_command('focus')
+
+
 def main():
     """Main entry point.
 
     Special invocation modes (checked before constructing WhisperFreeApp):
         --ipc-toggle: send 'toggle' to the running instance and exit.
                       Used by the CLI shim scripts/whisper-free.
+
+    On Windows, a plain launch first checks for an already-running
+    instance (issue #17) and, if found, focuses it and exits instead of
+    starting a second process. macOS/Linux are unaffected: macOS already
+    dedupes via Launch Services (`open -a`), and this is scoped to the
+    Windows single-instance issue.
 
     Default: launch the full app.
     """
@@ -1154,6 +1221,10 @@ def main():
 
     if '--ipc-toggle' in sys.argv:
         sys.exit(_handle_ipc_toggle_and_exit())
+
+    if sys.platform == 'win32' and _try_focus_running_instance():
+        logger.info("Whisper-Free is already running; focused existing window.")
+        sys.exit(0)
 
     try:
         app = WhisperFreeApp()
