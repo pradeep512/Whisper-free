@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-    Build the Whisper-Free Windows onedir bundle with PyInstaller.
+    Build the Whisper-Free Windows onedir bundle with PyInstaller, then wrap
+    it in a per-user Inno Setup installer.
 
 .DESCRIPTION
     Mirrors scripts/build_macos.sh for Windows. Produces dist/Whisper-Free/,
     a onedir bundle (not onefile -- see packaging/windows/Whisper-Free.spec
-    and ADR-0001 for why). Wrap the result with the Inno Setup installer
-    (packaging/windows/installer.iss, issue #21) to produce a distributable
-    .exe.
+    and ADR-0001 for why), then compiles
+    dist/installer/Whisper-Free-Setup-<version>.exe from
+    packaging/windows/installer.iss via Inno Setup's ISCC.exe (skipped with a
+    warning if Inno Setup isn't installed -- the bundle itself still builds).
 
 .PREREQUISITES
     One-time setup:
@@ -26,12 +28,18 @@
     bundle is still produced but MP3/M4A/WebM file transcription will need a
     system FFmpeg on PATH.
 
+    Inno Setup (https://jrsoftware.org/isinfo.php) must be installed for the
+    installer-compile step; if `iscc` isn't found on PATH or at its default
+    install location, that step is skipped with a warning and only the
+    onedir bundle is produced.
+
 .USAGE
     ./scripts/build_windows.ps1
     VERSION=1.0.1 ./scripts/build_windows.ps1   (or: $env:VERSION = '1.0.1')
 
 .OUTPUTS
-    dist/Whisper-Free/Whisper-Free.exe  (+ supporting onedir contents)
+    dist/Whisper-Free/Whisper-Free.exe            (onedir bundle)
+    dist/installer/Whisper-Free-Setup-<ver>.exe   (per-user installer)
 #>
 
 $ErrorActionPreference = "Stop"
@@ -144,5 +152,36 @@ Write-Host "  Bundle: $Bundle ($BundleSize)"
 Write-Host ""
 Write-Host "Smoke test the bundle:"
 Write-Host "  & '$Exe'"
+
+# --- Compile the Inno Setup installer ------------------------------------------
+
+$Iscc = Get-Command iscc -ErrorAction SilentlyContinue
+if (-not $Iscc) {
+    $DefaultIscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+    if (Test-Path $DefaultIscc) {
+        $Iscc = Get-Item $DefaultIscc
+    }
+}
+
+if (-not $Iscc) {
+    Write-Warning ""
+    Write-Warning "Inno Setup's ISCC.exe was not found on PATH -- skipping installer build."
+    Write-Warning "Install Inno Setup (https://jrsoftware.org/isinfo.php) and re-run to produce"
+    Write-Warning "dist\installer\Whisper-Free-Setup-$($env:VERSION).exe, or compile manually:"
+    Write-Warning "  iscc packaging\windows\installer.iss /DMyAppVersion=$($env:VERSION)"
+} else {
+    Write-Host ""
+    Write-Host "==> Compiling installer with Inno Setup..."
+    & $Iscc.Source "packaging\windows\installer.iss" "/DMyAppVersion=$($env:VERSION)"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Inno Setup compilation failed."
+    }
+    $InstallerExe = "dist\installer\Whisper-Free-Setup-$($env:VERSION).exe"
+    if (Test-Path $InstallerExe) {
+        Write-Host "  [OK] Installer built: $InstallerExe"
+    } else {
+        Write-Error "Inno Setup reported success but $InstallerExe was not found."
+    }
+}
+
 Write-Host ""
-Write-Host "Next: wrap with the Inno Setup installer (packaging\windows\installer.iss, issue #21)."
