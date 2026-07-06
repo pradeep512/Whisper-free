@@ -8,10 +8,14 @@ loop starts.
 Responsibilities:
 - Construct and wire the system tray TrayController.
 - Wire MainWindow's hide-to-tray close behavior to a one-time balloon.
+- Make the bundled ffmpeg.exe (packaging/windows/#20) discoverable so
+  MP3/M4A/WebM file transcription works with no system FFmpeg on PATH.
 """
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -26,7 +30,40 @@ def init_windows(app) -> None:
     Args:
         app: The WhisperFreeApp instance.
     """
+    ensure_bundled_ffmpeg_on_path()
     _install_tray_icon(app)
+
+
+def ensure_bundled_ffmpeg_on_path() -> bool:
+    """Prepend the frozen bundle's directory to PATH if it ships ffmpeg.exe.
+
+    audioread (used by librosa for MP3/M4A/WebM) shells out to whatever
+    `ffmpeg` resolves to via the OS's normal PATH search -- it never takes an
+    explicit binary path. The PyInstaller onedir bundle (packaging/windows/
+    Whisper-Free.spec) places ffmpeg.exe next to Whisper-Free.exe, so
+    prepending that directory makes it discoverable with no user setup.
+
+    No-op when not running frozen, or when the bundle has no ffmpeg.exe
+    (e.g. a dev/source run, or a CPU-only build missing the asset) -- the
+    existing system-FFmpeg-on-PATH behavior is unaffected either way.
+
+    Returns:
+        True if the bundled ffmpeg.exe was found and PATH was updated.
+    """
+    if not getattr(sys, 'frozen', False):
+        return False
+
+    bundle_dir = Path(sys.executable).resolve().parent
+    ffmpeg_exe = bundle_dir / 'ffmpeg.exe'
+    if not ffmpeg_exe.exists():
+        return False
+
+    bundle_dir_str = str(bundle_dir)
+    path = os.environ.get('PATH', '')
+    if bundle_dir_str not in path.split(os.pathsep):
+        os.environ['PATH'] = bundle_dir_str + os.pathsep + path
+    logger.info(f"Bundled ffmpeg.exe found at {ffmpeg_exe}; prepended to PATH")
+    return True
 
 
 def _install_tray_icon(app) -> None:
