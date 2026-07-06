@@ -19,7 +19,7 @@ from PySide6.QtGui import QColor, QIcon
 from pathlib import Path
 import logging
 
-from app.core.audio_file_loader import AudioFileLoader
+from app.core.audio_file_loader import AudioFileLoader, AudioLoadError
 
 logger = logging.getLogger(__name__)
 
@@ -349,6 +349,50 @@ class BatchTranscribePanel(QWidget):
                 "Add files using the 'Add Files' button."
             )
             return
+
+        # Pre-flight (#27): warn once, up front, if any queued file needs
+        # ffmpeg (video, or a compressed audio format) and ffmpeg isn't
+        # resolvable - rather than only failing per-file mid-batch.
+        if AudioFileLoader.should_warn_missing_ffmpeg(file_paths):
+            choice = QMessageBox.warning(
+                self,
+                "ffmpeg Not Found",
+                AudioFileLoader.ffmpeg_missing_message(),
+                QMessageBox.Ok | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if choice != QMessageBox.Ok:
+                logger.info("Batch start cancelled: ffmpeg missing pre-flight warning")
+                return
+
+        # Soft long-media warning (#27): best-effort duration probe over
+        # the queued files; whole-file behavior is retained regardless,
+        # this only lets the user decide whether to proceed.
+        long_files = []
+        for path in file_paths:
+            try:
+                duration = AudioFileLoader.get_duration(path)
+            except AudioLoadError:
+                continue
+            if AudioFileLoader.is_long_media(duration):
+                long_files.append(Path(path).name)
+
+        if long_files:
+            files_list = "\n  • ".join(long_files)
+            choice = QMessageBox.question(
+                self,
+                "Long Media Files",
+                "The following files are very long and may be slow to "
+                "transcribe (the whole file is processed in one pass, "
+                "no chunking):\n\n"
+                f"  • {files_list}\n\n"
+                "Do you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if choice != QMessageBox.Yes:
+                logger.info("Batch start cancelled: long-media soft warning declined")
+                return
 
         # Get transcription settings
         language = self.config.get('whisper.language')

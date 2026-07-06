@@ -60,6 +60,7 @@ class FileTranscribePanel(QWidget):
 
         # State
         self.selected_file_path = None
+        self.selected_duration_seconds = None
         self.current_job_id = None
         self.last_output_path = None
         self.last_transcription_text = ""
@@ -429,10 +430,12 @@ class FileTranscribePanel(QWidget):
             # Get duration
             try:
                 duration = AudioFileLoader.get_duration(file_path)
+                self.selected_duration_seconds = duration
                 duration_text = f"Duration: {self._format_duration(duration)}"
                 self.duration_label.setText(duration_text)
             except AudioLoadError as e:
                 logger.warning(f"Could not get duration: {e}")
+                self.selected_duration_seconds = None
                 self.duration_label.setText("Duration: Unknown")
 
             # Update UI
@@ -459,6 +462,37 @@ class FileTranscribePanel(QWidget):
         """Handle transcribe button click"""
         if not self.selected_file_path:
             return
+
+        # Pre-flight (#27): warn once, up front, if this file needs ffmpeg
+        # (video, or a compressed audio format) and ffmpeg isn't resolvable
+        # - rather than only failing mid-transcription.
+        if AudioFileLoader.should_warn_missing_ffmpeg([self.selected_file_path]):
+            choice = QMessageBox.warning(
+                self,
+                "ffmpeg Not Found",
+                AudioFileLoader.ffmpeg_missing_message(),
+                QMessageBox.Ok | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if choice != QMessageBox.Ok:
+                logger.info("Transcription cancelled: ffmpeg missing pre-flight warning")
+                return
+
+        # Soft long-media warning (#27) - whole-file behavior is retained,
+        # this only lets the user decide whether to proceed.
+        if self.selected_duration_seconds is not None and AudioFileLoader.is_long_media(
+            self.selected_duration_seconds
+        ):
+            choice = QMessageBox.question(
+                self,
+                "Long Media File",
+                AudioFileLoader.long_media_warning_message(self.selected_duration_seconds),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if choice != QMessageBox.Yes:
+                logger.info("Transcription cancelled: long-media soft warning declined")
+                return
 
         logger.info(f"Starting transcription via queue manager: {self.selected_file_path}")
 
@@ -835,6 +869,7 @@ class FileTranscribePanel(QWidget):
     def _on_clear_clicked(self):
         """Handle clear button"""
         self.selected_file_path = None
+        self.selected_duration_seconds = None
         self.last_output_path = None
         self.last_transcription_text = ""
 

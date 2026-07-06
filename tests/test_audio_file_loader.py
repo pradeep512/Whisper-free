@@ -296,3 +296,168 @@ def test_load_audio_dispatches_video_files_to_extractor(tmp_path, monkeypatch):
 
     assert result is sentinel
     assert called_with["path"] == str(video_path)
+
+
+# ---------------------------------------------------------------------------
+# #27: OS-aware ffmpeg-missing message helper
+# ---------------------------------------------------------------------------
+
+
+def test_ffmpeg_missing_message_windows_mentions_bundled_app(monkeypatch):
+    monkeypatch.setattr(
+        "app.core.audio_file_loader.platform.system", lambda: "Windows"
+    )
+
+    message = AudioFileLoader.ffmpeg_missing_message()
+
+    assert "apt-get" not in message
+    assert "bundled" in message.lower()
+    assert "path" in message.lower()
+
+
+def test_ffmpeg_missing_message_non_windows_mentions_package_manager(monkeypatch):
+    monkeypatch.setattr(
+        "app.core.audio_file_loader.platform.system", lambda: "Linux"
+    )
+
+    message = AudioFileLoader.ffmpeg_missing_message()
+
+    assert "apt-get" in message
+    assert "bundled" not in message.lower()
+
+
+def test_ffmpeg_missing_message_windows_and_non_windows_differ(monkeypatch):
+    monkeypatch.setattr(
+        "app.core.audio_file_loader.platform.system", lambda: "Windows"
+    )
+    windows_message = AudioFileLoader.ffmpeg_missing_message()
+
+    monkeypatch.setattr(
+        "app.core.audio_file_loader.platform.system", lambda: "Darwin"
+    )
+    mac_message = AudioFileLoader.ffmpeg_missing_message()
+
+    assert windows_message != mac_message
+
+
+def test_ffmpeg_missing_message_includes_context_prefix(monkeypatch):
+    monkeypatch.setattr(
+        "app.core.audio_file_loader.platform.system", lambda: "Windows"
+    )
+
+    message = AudioFileLoader.ffmpeg_missing_message("MP4 video")
+
+    assert "Cannot process MP4 video" in message
+
+
+# ---------------------------------------------------------------------------
+# #27: ffmpeg pre-flight probe + "should warn given these queued files"
+# ---------------------------------------------------------------------------
+
+
+def test_ffmpeg_available_true_when_which_resolves(monkeypatch):
+    monkeypatch.setattr(
+        "app.core.audio_file_loader.shutil.which", lambda name: r"C:\ffmpeg\ffmpeg.exe"
+    )
+    assert AudioFileLoader.ffmpeg_available() is True
+
+
+def test_ffmpeg_available_false_when_which_does_not_resolve(monkeypatch):
+    monkeypatch.setattr("app.core.audio_file_loader.shutil.which", lambda name: None)
+    assert AudioFileLoader.ffmpeg_available() is False
+
+
+def test_requires_ffmpeg_true_for_video():
+    assert AudioFileLoader.requires_ffmpeg("lecture.mp4") is True
+
+
+def test_requires_ffmpeg_true_for_compressed_audio():
+    assert AudioFileLoader.requires_ffmpeg("song.mp3") is True
+
+
+def test_requires_ffmpeg_false_for_wav():
+    assert AudioFileLoader.requires_ffmpeg("clip.wav") is False
+
+
+def test_should_warn_missing_ffmpeg_false_when_ffmpeg_available(monkeypatch):
+    monkeypatch.setattr(AudioFileLoader, "ffmpeg_available", staticmethod(lambda: True))
+    assert AudioFileLoader.should_warn_missing_ffmpeg(["video.mp4"]) is False
+
+
+def test_should_warn_missing_ffmpeg_false_when_no_file_needs_it(monkeypatch):
+    monkeypatch.setattr(AudioFileLoader, "ffmpeg_available", staticmethod(lambda: False))
+    assert AudioFileLoader.should_warn_missing_ffmpeg(["clip.wav", "clip.flac"]) is False
+
+
+def test_should_warn_missing_ffmpeg_true_when_video_queued_and_ffmpeg_missing(monkeypatch):
+    monkeypatch.setattr(AudioFileLoader, "ffmpeg_available", staticmethod(lambda: False))
+    assert AudioFileLoader.should_warn_missing_ffmpeg(["clip.wav", "movie.mp4"]) is True
+
+
+def test_should_warn_missing_ffmpeg_true_when_compressed_audio_queued_and_ffmpeg_missing(monkeypatch):
+    monkeypatch.setattr(AudioFileLoader, "ffmpeg_available", staticmethod(lambda: False))
+    assert AudioFileLoader.should_warn_missing_ffmpeg(["song.mp3"]) is True
+
+
+def test_should_warn_missing_ffmpeg_false_for_empty_queue(monkeypatch):
+    monkeypatch.setattr(AudioFileLoader, "ffmpeg_available", staticmethod(lambda: False))
+    assert AudioFileLoader.should_warn_missing_ffmpeg([]) is False
+
+
+# ---------------------------------------------------------------------------
+# #27: soft long-media warning
+# ---------------------------------------------------------------------------
+
+
+def test_is_long_media_false_below_threshold():
+    assert AudioFileLoader.is_long_media(60 * 60) is False  # 1 hour
+
+
+def test_is_long_media_true_at_threshold():
+    assert AudioFileLoader.is_long_media(
+        AudioFileLoader.LONG_MEDIA_WARNING_THRESHOLD_SECONDS
+    ) is True
+
+
+def test_is_long_media_true_above_threshold():
+    assert AudioFileLoader.is_long_media(5 * 60 * 60) is True  # 5 hours
+
+
+def test_long_media_warning_message_mentions_hours_and_no_chunking():
+    message = AudioFileLoader.long_media_warning_message(4 * 60 * 60)
+    assert "4.0 hours" in message
+    assert "no chunking" in message.lower()
+
+
+# ---------------------------------------------------------------------------
+# #27: video-with-no-audio-track detection
+# ---------------------------------------------------------------------------
+
+
+def test_looks_like_no_audio_stream_true_for_known_ffmpeg_phrasing():
+    stderr = "Output file #0 does not contain any stream"
+    assert AudioFileLoader.looks_like_no_audio_stream(stderr) is True
+
+
+def test_looks_like_no_audio_stream_false_for_unrelated_error():
+    stderr = "No such file or directory"
+    assert AudioFileLoader.looks_like_no_audio_stream(stderr) is False
+
+
+def test_extract_to_wav_raises_specific_message_when_video_has_no_audio_track(tmp_path, monkeypatch):
+    video_path = tmp_path / "silent.mp4"
+    video_path.write_bytes(b"fake video bytes")
+
+    monkeypatch.setattr(
+        "app.core.audio_file_loader.shutil.which", lambda name: r"C:\ffmpeg\ffmpeg.exe"
+    )
+
+    def fake_run(cmd, capture_output, text):
+        return _mock_completed_process(
+            returncode=1, stderr="Output file #0 does not contain any stream"
+        )
+
+    monkeypatch.setattr("app.core.audio_file_loader.subprocess.run", fake_run)
+
+    with pytest.raises(AudioLoadError, match="no audio track"):
+        VideoAudioExtractor.extract_to_wav(str(video_path))

@@ -23,9 +23,10 @@ License: MIT
 
 import numpy as np
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -74,6 +75,116 @@ class AudioFileLoader:
 
     # Formats that require ffmpeg
     FFMPEG_FORMATS = ['.mp3', '.m4a', '.opus', '.webm']
+
+    # Soft "this may be slow" threshold for very long Media files (#27).
+    # Whole-file (non-chunked) transcription is retained regardless; this
+    # only gates a warning so the user can decide whether to proceed.
+    LONG_MEDIA_WARNING_THRESHOLD_SECONDS = 3 * 60 * 60  # 3 hours
+
+    @staticmethod
+    def ffmpeg_missing_message(context: str = "") -> str:
+        """
+        Build an OS-aware, directly-assertable message explaining that
+        ffmpeg could not be found or used (#27). Replaces the historical
+        Linux-only "sudo apt-get install ffmpeg" guidance, which was wrong
+        on Windows and misleading for MP3/M4A/OPUS/WebM audio.
+
+        Args:
+            context: Optional short description of what needed ffmpeg
+                (e.g. "MP4 file", "MP3 file") to prefix the message with.
+
+        Returns:
+            A user-facing, multi-line string with OS-appropriate guidance.
+        """
+        prefix = f"Cannot process {context}: " if context else ""
+        if platform.system() == "Windows":
+            return (
+                f"{prefix}ffmpeg could not be found.\n\n"
+                "The installed Whisper-Free app ships with ffmpeg bundled, "
+                "so this normally only happens when running from source.\n\n"
+                "If you are running from source: install ffmpeg "
+                "(https://ffmpeg.org/download.html), make sure it is on "
+                "your PATH, then restart Whisper-Free."
+            )
+        return (
+            f"{prefix}ffmpeg could not be found.\n\n"
+            "Install ffmpeg using your package manager, e.g.:\n"
+            "  macOS:          brew install ffmpeg\n"
+            "  Debian/Ubuntu:  sudo apt-get install ffmpeg\n"
+            "  Fedora:         sudo dnf install ffmpeg\n\n"
+            "Then make sure it is on your PATH and restart Whisper-Free."
+        )
+
+    @staticmethod
+    def ffmpeg_available() -> bool:
+        """Lightweight probe: is an ffmpeg binary resolvable on PATH?"""
+        return shutil.which("ffmpeg") is not None
+
+    @staticmethod
+    def requires_ffmpeg(file_path: str) -> bool:
+        """
+        Whether loading this Media file needs ffmpeg: any video, or a
+        compressed audio format (FFMPEG_FORMATS) that librosa/audioread
+        shells out to ffmpeg for.
+        """
+        suffix = Path(file_path).suffix.lower()
+        return AudioFileLoader.is_video(file_path) or suffix in AudioFileLoader.FFMPEG_FORMATS
+
+    @staticmethod
+    def should_warn_missing_ffmpeg(file_paths: List[str]) -> bool:
+        """
+        Pre-flight decision (#27): should a single up-front warning be
+        shown before starting a run (single-file or Batch) over these
+        queued files?
+
+        True only when ffmpeg cannot be resolved on PATH *and* at least
+        one queued file would actually need it to load. Runtime failures
+        for files that don't need ffmpeg still fall through to the
+        existing per-file Failed/retry/details UI.
+        """
+        if AudioFileLoader.ffmpeg_available():
+            return False
+        return any(AudioFileLoader.requires_ffmpeg(p) for p in file_paths)
+
+    @staticmethod
+    def is_long_media(duration_seconds: float) -> bool:
+        """Soft "this may be slow" check for very long Media files (#27)."""
+        return duration_seconds >= AudioFileLoader.LONG_MEDIA_WARNING_THRESHOLD_SECONDS
+
+    @staticmethod
+    def long_media_warning_message(duration_seconds: float) -> str:
+        """
+        Build the soft warning shown before transcribing a very long
+        Media file. Whole-file behavior (no chunking) is retained; this
+        only informs so the user can decide whether to proceed.
+        """
+        hours = duration_seconds / 3600.0
+        return (
+            f"This Media file is about {hours:.1f} hours long.\n\n"
+            "Transcribing very long files can take a while and use "
+            "significant memory - the whole file is processed in one "
+            "pass (no chunking).\n\n"
+            "Do you want to continue?"
+        )
+
+    # Substrings ffmpeg emits on stderr when a container has no audio
+    # stream to extract - matched case-insensitively.
+    _NO_AUDIO_STREAM_MARKERS = (
+        "does not contain any stream",
+        "matches no streams",
+        "stream map '0:a' matches no streams",
+    )
+
+    @staticmethod
+    def looks_like_no_audio_stream(ffmpeg_stderr: str) -> bool:
+        """
+        Heuristic: does this ffmpeg stderr output indicate the input has
+        no audio track (rather than some other decode failure)? Used so
+        a video with no audio track fails with a clear, specific message
+        instead of a generic ffmpeg error dump (#27).
+        """
+        lowered = (ffmpeg_stderr or "").lower()
+        return any(marker in lowered for marker in AudioFileLoader._NO_AUDIO_STREAM_MARKERS)
 
     @staticmethod
     def get_dialog_filter() -> str:
@@ -239,18 +350,16 @@ class AudioFileLoader:
                 if 'NoBackendError' in repr(e) or 'NoBackend' in error_msg or not error_msg:
                     if path.suffix.lower() in AudioFileLoader.FFMPEG_FORMATS:
                         raise AudioLoadError(
-                            f"Cannot load {path.suffix.upper()} file: ffmpeg is not installed.\n\n"
-                            f"Install ffmpeg:\n"
-                            f"  sudo apt-get install ffmpeg\n\n"
-                            f"Or convert to WAV format:\n"
-                            f"  ffmpeg -i '{path.name}' -ar 16000 -ac 1 output.wav\n\n"
-                            f"Formats that work without ffmpeg: WAV, FLAC, OGG"
+                            AudioFileLoader.ffmpeg_missing_message(
+                                f"{path.suffix.upper()} file"
+                            )
+                            + "\n\nFormats that work without ffmpeg: WAV, FLAC, OGG"
                         )
 
                 raise AudioLoadError(
                     f"Failed to load audio file: {error_msg}\n\n"
-                    f"This may require ffmpeg for certain formats.\n"
-                    f"Install: sudo apt-get install ffmpeg"
+                    "This may require ffmpeg for certain formats.\n\n"
+                    + AudioFileLoader.ffmpeg_missing_message()
                 )
 
             # Verify output format
@@ -320,13 +429,14 @@ class AudioFileLoader:
                 if 'NoBackendError' in repr(e) or 'NoBackend' in error_msg or not error_msg:
                     if path.suffix.lower() in AudioFileLoader.FFMPEG_FORMATS:
                         raise AudioLoadError(
-                            f"Cannot get duration for {path.suffix.upper()} file: ffmpeg is not installed.\n\n"
-                            f"Install: sudo apt-get install ffmpeg"
+                            AudioFileLoader.ffmpeg_missing_message(
+                                f"{path.suffix.upper()} file"
+                            )
                         )
 
                 raise AudioLoadError(
                     f"Failed to get audio duration: {error_msg}\n\n"
-                    f"Install ffmpeg: sudo apt-get install ffmpeg"
+                    + AudioFileLoader.ffmpeg_missing_message()
                 )
 
         except AudioLoadError:
@@ -369,9 +479,7 @@ class VideoAudioExtractor:
         ffmpeg_path = shutil.which("ffmpeg")
         if not ffmpeg_path:
             raise AudioLoadError(
-                "Cannot extract audio from video: ffmpeg was not found on PATH.\n\n"
-                "Install ffmpeg and ensure it is on PATH, or use the installed "
-                "Windows build, which bundles ffmpeg."
+                AudioFileLoader.ffmpeg_missing_message(f"{Path(file_path).suffix.upper()} video")
             )
 
         fd, temp_wav_path = tempfile.mkstemp(suffix=".wav")
@@ -395,9 +503,15 @@ class VideoAudioExtractor:
                 text=True,
             )
             if result.returncode != 0:
+                stderr = (result.stderr or "").strip()
+                if AudioFileLoader.looks_like_no_audio_stream(stderr):
+                    raise AudioLoadError(
+                        f"This video has no audio track to transcribe: "
+                        f"{Path(file_path).name}"
+                    )
                 raise AudioLoadError(
                     "ffmpeg failed to extract audio from video "
-                    f"(exit code {result.returncode}):\n{result.stderr.strip()}"
+                    f"(exit code {result.returncode}):\n{stderr}"
                 )
         except Exception:
             VideoAudioExtractor._safe_remove(temp_wav_path)
