@@ -4,10 +4,13 @@ These test the pure resolve_device()/compute_type_for() helpers by mocking
 ctranslate2's CUDA device count, so they run on any platform/machine
 regardless of whether a GPU or even ctranslate2 itself is present.
 """
+import os
+import sys
 from unittest.mock import MagicMock, patch
 
 from app.core.whisper_engine_faster_whisper import (
     compute_type_for,
+    ensure_cuda_dlls_on_path,
     resolve_device,
     resolve_effective_device,
 )
@@ -68,3 +71,45 @@ def test_resolve_effective_device_auto_detects_when_none():
     fake_ct2.get_cuda_device_count.return_value = 1
     with patch.dict("sys.modules", {"ctranslate2": fake_ct2}):
         assert resolve_effective_device(None) == "cuda"
+
+
+def test_ensure_cuda_dlls_noop_when_not_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    find_spec = MagicMock()
+    monkeypatch.setattr("importlib.util.find_spec", find_spec)
+    ensure_cuda_dlls_on_path()
+    # Bails on the platform check before ever probing for the nvidia package.
+    find_spec.assert_not_called()
+
+
+def test_ensure_cuda_dlls_noop_when_frozen(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    find_spec = MagicMock()
+    monkeypatch.setattr("importlib.util.find_spec", find_spec)
+    ensure_cuda_dlls_on_path()
+    # Frozen bundle ships DLLs next to the exe; must not touch PATH here.
+    find_spec.assert_not_called()
+
+
+def test_ensure_cuda_dlls_adds_nvidia_bin_dirs_to_path(monkeypatch, tmp_path):
+    # Simulate an installed nvidia-cublas-cu12 wheel: nvidia/cublas/bin/...
+    bindir = tmp_path / "cublas" / "bin"
+    bindir.mkdir(parents=True)
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr(os, "add_dll_directory", MagicMock(), raising=False)
+    monkeypatch.setenv("PATH", "")
+
+    fake_spec = MagicMock()
+    fake_spec.submodule_search_locations = [str(tmp_path)]
+    monkeypatch.setattr(
+        "importlib.util.find_spec",
+        lambda name: fake_spec if name == "nvidia" else None,
+    )
+
+    ensure_cuda_dlls_on_path()
+
+    assert str(bindir) in os.environ["PATH"].split(os.pathsep)
+    os.add_dll_directory.assert_called_once_with(str(bindir))

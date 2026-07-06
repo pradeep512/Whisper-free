@@ -15,11 +15,58 @@ honors HF_HOME (pointed at our models dir by app.platform.windows.paths).
 from __future__ import annotations
 
 import logging
+import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_cuda_dlls_on_path() -> None:
+    """Make pip-installed NVIDIA CUDA runtime DLLs loadable on Windows.
+
+    faster-whisper/CTranslate2 loads its CUDA libraries (cublas64_12.dll,
+    cudnn*.dll, ...) by name through the OS loader. The nvidia-cublas-cu12 /
+    nvidia-cudnn-cu12 wheels install those DLLs under
+    site-packages/nvidia/<lib>/bin, but Windows does not add those
+    directories to the DLL search path automatically, so a source run
+    (python -m app.main) fails with "cublas64_12.dll is not found" even
+    though the packages are installed.
+
+    Register each nvidia .../bin directory with both os.add_dll_directory()
+    and PATH so CTranslate2's loader finds them (the loader needs PATH too;
+    add_dll_directory alone isn't sufficient for its internal dlopen).
+
+    No-op on non-Windows, when running frozen (the PyInstaller bundle ships
+    the DLLs flattened next to the exe, already on the search path), or when
+    the nvidia wheels aren't installed (a CPU-only setup).
+    """
+    if sys.platform != "win32" or getattr(sys, "frozen", False):
+        return
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("nvidia")
+        if spec is None or not spec.submodule_search_locations:
+            return
+        for root in spec.submodule_search_locations:
+            for bindir in Path(root).glob("*/bin"):
+                if not bindir.is_dir():
+                    continue
+                bindir_str = str(bindir)
+                try:
+                    os.add_dll_directory(bindir_str)
+                except (OSError, AttributeError):
+                    pass
+                path = os.environ.get("PATH", "")
+                if bindir_str not in path.split(os.pathsep):
+                    os.environ["PATH"] = bindir_str + os.pathsep + path
+        logger.debug("Registered NVIDIA CUDA DLL directories for CTranslate2")
+    except Exception as e:
+        logger.debug(f"Could not register NVIDIA CUDA DLL directories: {e}")
 
 
 def resolve_device() -> str:
@@ -108,6 +155,9 @@ class WhisperEngineFasterWhisper:
 
     def _load_model(self, model_name: str) -> None:
         from faster_whisper import WhisperModel
+
+        if self.device == "cuda":
+            ensure_cuda_dlls_on_path()
 
         logger.info(
             f"Loading faster-whisper model '{model_name}' "
