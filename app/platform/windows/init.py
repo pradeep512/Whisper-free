@@ -35,13 +35,13 @@ def init_windows(app) -> None:
 
 
 def ensure_bundled_ffmpeg_on_path() -> bool:
-    """Prepend the frozen bundle's directory to PATH if it ships ffmpeg.exe.
+    """Prepend the bundled ffmpeg.exe directory to PATH if present.
 
     audioread (used by librosa for MP3/M4A/WebM) shells out to whatever
     `ffmpeg` resolves to via the OS's normal PATH search -- it never takes an
-    explicit binary path. The PyInstaller onedir bundle (packaging/windows/
-    Whisper-Free.spec) places ffmpeg.exe next to Whisper-Free.exe, so
-    prepending that directory makes it discoverable with no user setup.
+    explicit binary path. PyInstaller 6 onedir bundles place data files under
+    ``_internal`` by default, while older/local layouts may place ffmpeg.exe
+    next to Whisper-Free.exe, so check both locations.
 
     No-op when not running frozen, or when the bundle has no ffmpeg.exe
     (e.g. a dev/source run, or a CPU-only build missing the asset) -- the
@@ -54,14 +54,18 @@ def ensure_bundled_ffmpeg_on_path() -> bool:
         return False
 
     bundle_dir = Path(sys.executable).resolve().parent
-    ffmpeg_exe = bundle_dir / 'ffmpeg.exe'
-    if not ffmpeg_exe.exists():
+    candidates = [
+        bundle_dir / 'ffmpeg.exe',
+        bundle_dir / '_internal' / 'ffmpeg.exe',
+    ]
+    ffmpeg_exe = next((candidate for candidate in candidates if candidate.exists()), None)
+    if ffmpeg_exe is None:
         return False
 
-    bundle_dir_str = str(bundle_dir)
+    ffmpeg_dir_str = str(ffmpeg_exe.parent)
     path = os.environ.get('PATH', '')
-    if bundle_dir_str not in path.split(os.pathsep):
-        os.environ['PATH'] = bundle_dir_str + os.pathsep + path
+    if ffmpeg_dir_str not in path.split(os.pathsep):
+        os.environ['PATH'] = ffmpeg_dir_str + os.pathsep + path
     logger.info(f"Bundled ffmpeg.exe found at {ffmpeg_exe}; prepended to PATH")
     return True
 

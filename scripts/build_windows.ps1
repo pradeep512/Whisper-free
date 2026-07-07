@@ -93,12 +93,14 @@ $SrcPng = "assets\app-icon-512.png"
 $NeedsIcon = (-not (Test-Path $Icns)) -or ((Get-Item $SrcPng).LastWriteTime -gt (Get-Item $Icns -ErrorAction SilentlyContinue).LastWriteTime)
 if ($NeedsIcon) {
     Write-Host "==> Generating $Icns from $SrcPng"
+    $IconOut = $Icns.Replace("\", "/")
+    $IconSrc = $SrcPng.Replace("\", "/")
     python -c @"
 from PySide6.QtGui import QImage
-img = QImage('$SrcPng')
+img = QImage('$IconSrc')
 if img.isNull():
-    raise SystemExit('failed to load $SrcPng')
-img.scaled(256, 256).save('$Icns', 'ICO')
+    raise SystemExit('failed to load $IconSrc')
+img.scaled(256, 256).save('$IconOut', 'ICO')
 "@
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Icon generation failed."
@@ -129,13 +131,14 @@ if (-not (Test-Path $Exe)) {
 $BundleSize = "{0:N0} MB" -f ((Get-ChildItem $Bundle -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
 Write-Host "==> Built $Bundle ($BundleSize)"
 
-if (Test-Path "$Bundle\ffmpeg.exe") {
-    Write-Host "  [OK] ffmpeg.exe bundled"
+$FfmpegBundle = Get-ChildItem $Bundle -Recurse -Filter "ffmpeg.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($FfmpegBundle) {
+    Write-Host "  [OK] ffmpeg.exe bundled at $($FfmpegBundle.FullName)"
 } else {
     Write-Warning "  ffmpeg.exe NOT bundled -- MP3/M4A/WebM needs a system FFmpeg on PATH"
 }
 
-$CudaDlls = Get-ChildItem $Bundle -Filter "cublas*.dll" -ErrorAction SilentlyContinue
+$CudaDlls = Get-ChildItem $Bundle -Recurse -Filter "cublas*.dll" -ErrorAction SilentlyContinue
 if ($CudaDlls) {
     Write-Host "  [OK] CUDA runtime DLLs bundled ($($CudaDlls.Count) found)"
 } else {

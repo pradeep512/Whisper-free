@@ -36,7 +36,6 @@ OutputBaseFilename=Whisper-Free-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 ; Unsigned, matching the macOS release posture -- SmartScreen friction accepted.
-SignTool=
 SetupIconFile=..\..\assets\app-icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 WizardStyle=modern
