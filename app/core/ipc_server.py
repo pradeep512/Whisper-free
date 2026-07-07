@@ -14,7 +14,7 @@ Commands:
     "toggle" - Toggle recording (start if idle, stop if recording)
 """
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QCoreApplication, QObject, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 import logging
 
@@ -88,7 +88,15 @@ def send_ipc_command(command: str) -> bool:
     Returns:
         True if command was sent, False if app is not running
     """
-    socket = QLocalSocket()
+    # Parented to the running QCoreApplication so the C++ object outlives
+    # this function call: an unparented socket is destroyed the instant
+    # Python garbage-collects it, which on Windows named pipes can tear
+    # down the pipe before the server side has actually read the bytes we
+    # just wrote, silently dropping the command (observed while adding the
+    # Windows single-instance "focus" command, issue #17 — Unix domain
+    # sockets on Linux/macOS don't exhibit this race). Qt cleans it up when
+    # the application instance is destroyed.
+    socket = QLocalSocket(QCoreApplication.instance())
     socket.connectToServer(IPCServer.SERVER_NAME)
 
     if not socket.waitForConnected(1000):
@@ -97,5 +105,4 @@ def send_ipc_command(command: str) -> bool:
     socket.write(command.encode('utf-8'))
     socket.flush()
     socket.waitForBytesWritten(1000)
-    socket.disconnectFromServer()
     return True

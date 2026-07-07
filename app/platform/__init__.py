@@ -5,7 +5,8 @@ Call sites import from this module without caring about the OS:
     from app.platform import paths
     config = paths.config_file()
 
-The actual implementation is in app.platform.linux or app.platform.macos.
+The actual implementation is in app.platform.linux, app.platform.macos, or
+app.platform.windows.
 """
 import sys
 
@@ -17,10 +18,14 @@ elif sys.platform.startswith('linux'):
     from app.platform.linux import paths
     from app.platform.linux import hotkey_perms
     from app.platform.linux import autolaunch
+elif sys.platform == 'win32':
+    from app.platform.windows import paths
+    from app.platform.windows import hotkey_perms
+    from app.platform.windows import autolaunch
 else:
     raise RuntimeError(
         f"Unsupported platform: {sys.platform}. "
-        "Whisper-Free supports Linux and macOS (Apple Silicon) only."
+        "Whisper-Free supports Linux, macOS (Apple Silicon), and Windows."
     )
 
 
@@ -81,6 +86,9 @@ def platform_init(app) -> None:
         except ImportError:
             # macOS-specific deps not installed; degrade gracefully.
             pass
+    elif sys.platform == 'win32':
+        from app.platform.windows import init as windows_init
+        windows_init.init_windows(app)
     # Linux currently has nothing extra to do at init time.
 
 

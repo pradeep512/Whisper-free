@@ -324,24 +324,41 @@ class DynamicIslandOverlay(QWidget):
         else:
             self.setGeometry(target_geometry)
 
+    def _target_screen(self):
+        """Return the configured QScreen, falling back to the primary screen."""
+        screens = QApplication.screens()
+        if not screens:
+            return None
+        if 0 <= self._monitor_setting < len(screens):
+            return screens[self._monitor_setting]
+        return QApplication.primaryScreen() or screens[0]
+
     def _calculate_geometry(self, width: int, height: int) -> QRect:
         """
-        Calculate geometry based on position setting and monitor.
+        Calculate widget geometry based on position setting and monitor.
 
         Supports positions: top-left, top-center, top-right,
                            bottom-left, bottom-center, bottom-right
+
+        QScreen geometries in Qt 6 are device-independent coordinates even
+        when a Windows monitor is scaled to 150%/200%. The devicePixelRatio is
+        still read and used to snap coordinates to real device pixels before
+        converting back to logical coordinates; this avoids half-pixel drift
+        across mixed-DPI monitor boundaries. The returned QRect is widget
+        geometry adjusted so the final frameGeometry lands on the requested
+        screen position.
         """
-        screens = QApplication.screens()
-        if not screens:
+        screen = self._target_screen()
+        if screen is None:
             return QRect(0, 0, width, height)
 
-        # Get target screen
-        if 0 <= self._monitor_setting < len(screens):
-            screen = screens[self._monitor_setting]
-        else:
-            screen = QApplication.primaryScreen()
+        desired_frame = self._calculate_frame_geometry(width, height, screen)
+        return self._widget_geometry_for_frame(desired_frame)
 
+    def _calculate_frame_geometry(self, width: int, height: int, screen) -> QRect:
+        """Calculate the desired window frame geometry for a QScreen."""
         screen_geo = screen.availableGeometry()  # Excludes panels/taskbars
+        dpr = max(float(screen.devicePixelRatio()), 1.0)
 
         # Padding from screen edges
         padding_x = 20
@@ -361,7 +378,54 @@ class DynamicIslandOverlay(QWidget):
         else:  # top
             y = screen_geo.y() + padding_y
 
-        return QRect(x, y, width, height)
+        return QRect(
+            self._snap_to_device_pixel(x, dpr),
+            self._snap_to_device_pixel(y, dpr),
+            self._snap_to_device_pixel(width, dpr),
+            self._snap_to_device_pixel(height, dpr),
+        )
+
+    @staticmethod
+    def _snap_to_device_pixel(value: int, dpr: float) -> int:
+        """Round a logical coordinate/size to the nearest device pixel."""
+        return int(round(round(value * dpr) / dpr))
+
+    def _widget_geometry_for_frame(self, desired_frame: QRect) -> QRect:
+        """Convert a desired frameGeometry into QWidget geometry.
+
+        Windows can report non-zero frame margins for frameless/tool windows
+        after the native window is mapped. Applying those margins keeps
+        frameGeometry, not just client geometry, aligned to the selected
+        monitor's availableGeometry.
+        """
+        widget_geo = self.geometry()
+        frame_geo = self.frameGeometry()
+        if widget_geo.isNull() or frame_geo.isNull():
+            return QRect(desired_frame)
+
+        left = widget_geo.left() - frame_geo.left()
+        top = widget_geo.top() - frame_geo.top()
+        right = frame_geo.right() - widget_geo.right()
+        bottom = frame_geo.bottom() - widget_geo.bottom()
+
+        return QRect(
+            desired_frame.left() + left,
+            desired_frame.top() + top,
+            max(0, desired_frame.width() - left - right),
+            max(0, desired_frame.height() - top - bottom),
+        )
+
+    def _correct_geometry_to_frame(self) -> None:
+        """Re-apply geometry after mapping so frameGeometry is exact."""
+        if self._mode == OverlayMode.HIDDEN:
+            return
+        width, height, _ = self.MODE_CONFIGS[self._mode]
+        target_geometry = self._calculate_geometry(width, height)
+        if self.geometry() != target_geometry:
+            if self._is_wayland:
+                self._apply_geometry_wayland(target_geometry)
+            else:
+                self.setGeometry(target_geometry)
 
     def set_auto_dismiss_ms(self, ms: int) -> None:
         """
@@ -425,6 +489,7 @@ class DynamicIslandOverlay(QWidget):
             # (the tray's QMenu, a context menu dismiss animation, etc.)
             # has finished unwinding before we try to bring the overlay up.
             QTimer.singleShot(0, self._ensure_visible)
+            self._animation_group.finished.connect(self._correct_geometry_to_frame)
         else:
             # Hide after animation completes
             self._animation_group.finished.connect(self.hide)
@@ -440,6 +505,8 @@ class DynamicIslandOverlay(QWidget):
         try:
             self.show()
             self.raise_()
+            QTimer.singleShot(0, self._correct_geometry_to_frame)
+            QTimer.singleShot(50, self._correct_geometry_to_frame)
         except Exception as e:
             logger.warning(f"_ensure_visible failed: {e}")
 
