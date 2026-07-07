@@ -1,7 +1,7 @@
 """
-FileTranscribePanel - UI for transcribing audio files
+FileTranscribePanel - UI for transcribing Media files (audio or video)
 
-Provides interface to select audio files, transcribe them using Whisper,
+Provides interface to select Media files, transcribe them using Whisper,
 and save transcriptions as .txt files. Shows progress and results.
 
 Author: Whisper-Free Project
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class FileTranscribePanel(QWidget):
     """
-    Panel for transcribing audio files.
+    Panel for transcribing Media files (audio and video).
 
     Features:
     - File selection with format filter
@@ -60,6 +60,7 @@ class FileTranscribePanel(QWidget):
 
         # State
         self.selected_file_path = None
+        self.selected_duration_seconds = None
         self.current_job_id = None
         self.last_output_path = None
         self.last_transcription_text = ""
@@ -80,7 +81,7 @@ class FileTranscribePanel(QWidget):
 
         Top section: 2x2 grid of the four control cards.
             ┌──────────────────┬──────────────────┐
-            │ Select Audio File│ Transcription    │
+            │ Select Media File│ Transcription    │
             │                  │ Settings         │
             ├──────────────────┼──────────────────┤
             │ Output Formats   │ Transcribe       │
@@ -133,7 +134,7 @@ class FileTranscribePanel(QWidget):
         """Create file selection section."""
         from app.ui.theme import TEXT, TEXT_MUTED
 
-        group = QGroupBox("Select Audio File")
+        group = QGroupBox("Select Media File")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)
@@ -396,15 +397,14 @@ class FileTranscribePanel(QWidget):
         # Get last directory from config
         last_dir = self.config.get('file_transcribe.last_directory', str(Path.home()))
 
-        # Create filter string from supported formats
-        formats = AudioFileLoader.SUPPORTED_FORMATS
-        format_patterns = " ".join([f"*{fmt}" for fmt in formats])
-        filter_str = f"Audio Files ({format_patterns});;All Files (*.*)"
+        # Shared filter string (audio + video), derived from the loader's
+        # format lists - see AudioFileLoader.get_dialog_filter().
+        filter_str = AudioFileLoader.get_dialog_filter()
 
         # Open file dialog
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Audio File",
+            "Select Media File",
             last_dir,
             filter_str
         )
@@ -430,10 +430,12 @@ class FileTranscribePanel(QWidget):
             # Get duration
             try:
                 duration = AudioFileLoader.get_duration(file_path)
+                self.selected_duration_seconds = duration
                 duration_text = f"Duration: {self._format_duration(duration)}"
                 self.duration_label.setText(duration_text)
             except AudioLoadError as e:
                 logger.warning(f"Could not get duration: {e}")
+                self.selected_duration_seconds = None
                 self.duration_label.setText("Duration: Unknown")
 
             # Update UI
@@ -460,6 +462,37 @@ class FileTranscribePanel(QWidget):
         """Handle transcribe button click"""
         if not self.selected_file_path:
             return
+
+        # Pre-flight (#27): warn once, up front, if this file needs ffmpeg
+        # (video, or a compressed audio format) and ffmpeg isn't resolvable
+        # - rather than only failing mid-transcription.
+        if AudioFileLoader.should_warn_missing_ffmpeg([self.selected_file_path]):
+            choice = QMessageBox.warning(
+                self,
+                "ffmpeg Not Found",
+                AudioFileLoader.ffmpeg_missing_message(),
+                QMessageBox.Ok | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if choice != QMessageBox.Ok:
+                logger.info("Transcription cancelled: ffmpeg missing pre-flight warning")
+                return
+
+        # Soft long-media warning (#27) - whole-file behavior is retained,
+        # this only lets the user decide whether to proceed.
+        if self.selected_duration_seconds is not None and AudioFileLoader.is_long_media(
+            self.selected_duration_seconds
+        ):
+            choice = QMessageBox.question(
+                self,
+                "Long Media File",
+                AudioFileLoader.long_media_warning_message(self.selected_duration_seconds),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if choice != QMessageBox.Yes:
+                logger.info("Transcription cancelled: long-media soft warning declined")
+                return
 
         logger.info(f"Starting transcription via queue manager: {self.selected_file_path}")
 
@@ -799,7 +832,7 @@ class FileTranscribePanel(QWidget):
         QMessageBox.critical(
             self,
             "Transcription Failed",
-            f"Failed to transcribe audio file:\n\n{error_message}"
+            f"Failed to transcribe Media file:\n\n{error_message}"
         )
 
     def _cleanup_worker(self):
@@ -836,6 +869,7 @@ class FileTranscribePanel(QWidget):
     def _on_clear_clicked(self):
         """Handle clear button"""
         self.selected_file_path = None
+        self.selected_duration_seconds = None
         self.last_output_path = None
         self.last_transcription_text = ""
 

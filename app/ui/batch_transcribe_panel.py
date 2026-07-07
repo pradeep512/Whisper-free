@@ -1,7 +1,8 @@
 """
-BatchTranscribePanel - UI for batch transcribing multiple audio files
+BatchTranscribePanel - UI for batch transcribing multiple Media files
+(audio and video)
 
-Provides interface to select multiple audio files and transcribe them
+Provides interface to select multiple Media files and transcribe them
 sequentially with status tracking, progress bars, and retry capabilities.
 
 Author: Whisper-Free Project
@@ -18,6 +19,8 @@ from PySide6.QtGui import QColor, QIcon
 from pathlib import Path
 import logging
 
+from app.core.audio_file_loader import AudioFileLoader, AudioLoadError
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +35,7 @@ class FileStatus:
 
 class BatchTranscribePanel(QWidget):
     """
-    Panel for batch transcribing multiple audio files.
+    Panel for batch transcribing multiple Media files (audio and video).
 
     Features:
     - Multiple file selection
@@ -91,7 +94,7 @@ class BatchTranscribePanel(QWidget):
         header_layout.addStretch()
 
         # Help text
-        help_text = QLabel("Add multiple files and transcribe them sequentially")
+        help_text = QLabel("Add multiple audio and video Media files and transcribe them sequentially")
         help_text.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         header_layout.addWidget(help_text)
 
@@ -206,9 +209,9 @@ class BatchTranscribePanel(QWidget):
         """Open file dialog to add multiple files"""
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select Audio Files",
+            "Select Media Files",
             self.config.get('file_transcribe.last_directory', ''),
-            "Audio Files (*.mp3 *.wav *.m4a *.flac *.ogg *.opus *.webm *.mp4 *.avi *.mkv)"
+            AudioFileLoader.get_dialog_filter()
         )
 
         if not file_paths:
@@ -346,6 +349,50 @@ class BatchTranscribePanel(QWidget):
                 "Add files using the 'Add Files' button."
             )
             return
+
+        # Pre-flight (#27): warn once, up front, if any queued file needs
+        # ffmpeg (video, or a compressed audio format) and ffmpeg isn't
+        # resolvable - rather than only failing per-file mid-batch.
+        if AudioFileLoader.should_warn_missing_ffmpeg(file_paths):
+            choice = QMessageBox.warning(
+                self,
+                "ffmpeg Not Found",
+                AudioFileLoader.ffmpeg_missing_message(),
+                QMessageBox.Ok | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if choice != QMessageBox.Ok:
+                logger.info("Batch start cancelled: ffmpeg missing pre-flight warning")
+                return
+
+        # Soft long-media warning (#27): best-effort duration probe over
+        # the queued files; whole-file behavior is retained regardless,
+        # this only lets the user decide whether to proceed.
+        long_files = []
+        for path in file_paths:
+            try:
+                duration = AudioFileLoader.get_duration(path)
+            except AudioLoadError:
+                continue
+            if AudioFileLoader.is_long_media(duration):
+                long_files.append(Path(path).name)
+
+        if long_files:
+            files_list = "\n  • ".join(long_files)
+            choice = QMessageBox.question(
+                self,
+                "Long Media Files",
+                "The following files are very long and may be slow to "
+                "transcribe (the whole file is processed in one pass, "
+                "no chunking):\n\n"
+                f"  • {files_list}\n\n"
+                "Do you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if choice != QMessageBox.Yes:
+                logger.info("Batch start cancelled: long-media soft warning declined")
+                return
 
         # Get transcription settings
         language = self.config.get('whisper.language')

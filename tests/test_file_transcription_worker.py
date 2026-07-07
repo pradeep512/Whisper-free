@@ -14,6 +14,7 @@ test_faster_whisper_engine.py.
 """
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -81,3 +82,42 @@ def test_batch_transcription_of_multiple_files(tmp_path, tiny_engine, config):
     for audio_path, result in zip(audio_paths, results):
         assert result["audio_file"] == str(audio_path)
         assert Path(result["output_path"]).exists()
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None,
+    reason="requires ffmpeg on PATH to synthesize the .mp4 fixture and to "
+    "decode it via VideoAudioExtractor (see docs/adr/0002-video-decode-via-ffmpeg.md)",
+)
+def test_single_video_file_transcription_writes_txt(tmp_path, tiny_engine, config):
+    """#25: a single video Media file transcribes end-to-end.
+
+    Synthesizes a ~2s .mp4 (video + the speech fixture's audio track) with
+    ffmpeg, then drives the same FileTranscriptionWorker seam used by the
+    audio tests above. Asserts a non-empty Transcription is produced and
+    written next to the source, exactly as for an audio Media file.
+    """
+    video_path = tmp_path / "hello_test.mp4"
+
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "color=c=black:s=64x64:d=2",
+            "-i", str(FIXTURE),
+            "-shortest",
+            "-c:v", "libx264", "-c:a", "aac",
+            str(video_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    result = _run_worker(video_path, tiny_engine, config)
+
+    assert "test" in result["text"].lower()
+    assert result["audio_file"] == str(video_path)
+
+    output_path = Path(result["output_path"])
+    assert output_path.exists()
+    assert output_path.suffix == ".txt"
+    assert "test" in output_path.read_text(encoding="utf-8").lower()
