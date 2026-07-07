@@ -225,8 +225,11 @@ class DatabaseManager:
             dt = datetime.fromisoformat(timestamp_str)
             now = datetime.now()
 
-            # Format time part
-            time_str = dt.strftime("%-I:%M %p")  # "2:34 PM"
+            # Format time part. Avoid the glibc-only "%-I"/"%-d" no-pad
+            # flags: they are invalid on Windows (strftime raises there),
+            # so strip the leading zeros portably instead.
+            hour = dt.hour % 12 or 12
+            time_str = f"{hour}:{dt.strftime('%M')} {dt.strftime('%p')}"  # "2:34 PM"
 
             # Determine date part
             if dt.date() == now.date():
@@ -234,7 +237,7 @@ class DatabaseManager:
             elif dt.date() == (now - timedelta(days=1)).date():
                 return f"Yesterday at {time_str}"
             else:
-                date_str = dt.strftime("%b %-d")  # "Jan 18"
+                date_str = f"{dt.strftime('%b')} {dt.day}"  # "Jan 18"
                 return f"{date_str} at {time_str}"
 
         except Exception as e:
